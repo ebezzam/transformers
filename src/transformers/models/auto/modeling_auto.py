@@ -422,6 +422,8 @@ MODEL_MAPPING_NAMES = OrderedDict(
         ("univnet", "UnivNetModel"),
         ("vaultgemma", "VaultGemmaModel"),
         ("vibevoice_acoustic_tokenizer", "VibeVoiceAcousticTokenizerModel"),
+        ("vibevoice_asr", "VibeVoiceASRForConditionalGeneration"),
+        ("vibevoice_semantic_tokenizer", "VibeVoiceASRSemanticTokenizerModel"),
         ("video_llama_3", "VideoLlama3Model"),
         ("video_llama_3_vision", "VideoLlama3VisionModel"),
         ("video_llava", "VideoLlavaModel"),
@@ -1109,6 +1111,7 @@ MODEL_FOR_SPEECH_SEQ_2_SEQ_MAPPING_NAMES = OrderedDict(
         ("speech-encoder-decoder", "SpeechEncoderDecoderModel"),
         ("speech_to_text", "Speech2TextForConditionalGeneration"),
         ("speecht5", "SpeechT5ForSpeechToText"),
+        ("vibevoice_asr", "VibeVoiceASRForConditionalGeneration"),
         ("whisper", "WhisperForConditionalGeneration"),
     ]
 )
