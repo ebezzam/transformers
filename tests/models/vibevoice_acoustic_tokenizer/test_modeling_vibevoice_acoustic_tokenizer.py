@@ -65,7 +65,7 @@ class VibeVoiceAcousticTokenizerModelTester:
         audio = floats_tensor([self.batch_size, self.channels, self.hidden_size], scale=1.0)
         config = self.get_config()
         # disable sampling for deterministic tests
-        inputs_dict = {"audio": audio, "sample": False}
+        inputs_dict = {"audio": audio, "vae_std": 0.0}
         return config, inputs_dict
 
     def prepare_config_and_inputs_for_common(self):
@@ -76,7 +76,7 @@ class VibeVoiceAcousticTokenizerModelTester:
         audio = floats_tensor([self.batch_size, self.channels, self.hidden_size], scale=1.0)
         config = self.get_config()
         # disable sampling for deterministic tests
-        inputs_dict = {"audio": audio, "sample": False}
+        inputs_dict = {"audio": audio, "vae_std": 0.0}
 
         return config, inputs_dict
 
@@ -146,7 +146,7 @@ class VibeVoiceAcousticTokenizerModelTest(ModelTesterMixin, unittest.TestCase):
             signature = inspect.signature(model.forward)
             arg_names = [*signature.parameters.keys()]
 
-            expected_arg_names = ["audio", "padding_cache", "use_cache", "sample"]
+            expected_arg_names = ["audio", "padding_cache", "use_cache", "vae_std"]
             self.assertListEqual(arg_names[: len(expected_arg_names)], expected_arg_names)
 
     @unittest.skip("VibeVoiceAcousticTokenizerModel does not have `inputs_embeds` logic")
@@ -334,7 +334,7 @@ class VibeVoiceAcousticTokenizerIntegrationTest(unittest.TestCase):
             torch_device, dtype=dtype
         )
         with torch.no_grad():
-            encoder_out = model.encode(processed_audio["input_values"]).latents
+            encoder_out = model.encode(processed_audio["input_values"], vae_std=0.0).latents
             acoustic_decoder_out = model.decode(encoder_out).audio
         encoder_out_flat = encoder_out.reshape(encoder_out.shape[0], -1)
         encoder_out = encoder_out_flat[..., : expected_encoder.shape[-1]].cpu()
