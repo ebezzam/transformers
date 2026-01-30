@@ -66,7 +66,7 @@ def map_old_key_to_new(old_key: str) -> str:
         # Check if replacement needs index shifting
         if isinstance(replacement, tuple):
             replacement_pattern, index_shift = replacement
-            
+
             # Use callback to handle index shifting
             def shift_index(match):
                 result = replacement_pattern
@@ -77,7 +77,7 @@ def map_old_key_to_new(old_key: str) -> str:
                     else:
                         result = result.replace(f"\\{i}", group)
                 return result
-            
+
             new_key, n = re.subn(pattern, shift_index, new_key)
         else:
             new_key, n = re.subn(pattern, replacement, new_key)
@@ -152,11 +152,22 @@ def convert_checkpoint(checkpoint, config_path, push_to_hub, bfloat16, processor
     if "fix_std" in acoustic_config_dict:
         # Original hardcodes a scaling factor for vae_std
         acoustic_config_dict["vae_std"] = acoustic_config_dict.pop("fix_std") / 0.8
-    
+
     # Remove unused/constant parameters
-    for key in ["decoder_depths", "decoder_n_filters", "decoder_ratios", "std_dist_type",
-                "pad_mode", "causal", "mixer_layer", "layernorm", "disable_last_norm",
-                "conv_norm", "corpus_normalize", "layernorm_elementwise_affine"]:
+    for key in [
+        "decoder_depths",
+        "decoder_n_filters",
+        "decoder_ratios",
+        "std_dist_type",
+        "pad_mode",
+        "causal",
+        "mixer_layer",
+        "layernorm",
+        "disable_last_norm",
+        "conv_norm",
+        "corpus_normalize",
+        "layernorm_elementwise_affine",
+    ]:
         acoustic_config_dict.pop(key, None)
 
     # 4) Convert state dict to match HF model structure
@@ -165,24 +176,23 @@ def convert_checkpoint(checkpoint, config_path, push_to_hub, bfloat16, processor
 
     # 5) Filter for acoustic tokenizer weights
     acoustic_state_dict = {
-        k: v for k, v in converted_state_dict.items()
-        if k.startswith("encoder.") or k.startswith("decoder.")
+        k: v for k, v in converted_state_dict.items() if k.startswith("encoder.") or k.startswith("decoder.")
     }
 
     # 6) Create and save acoustic tokenizer
     logger.info("Creating acoustic tokenizer model")
     acoustic_config = VibeVoiceAcousticTokenizerConfig(**acoustic_config_dict)
     acoustic_model = VibeVoiceAcousticTokenizerModel(acoustic_config).to(dtype)
-    
+
     # Load weights into HF model
     logger.info("Loading weights into model")
     missing, unexpected = acoustic_model.load_state_dict(acoustic_state_dict, strict=False)
-    
+
     if len(unexpected) != 0:
         raise ValueError(f"Unexpected keys: {unexpected}")
     if len(missing) != 0:
         raise ValueError(f"Missing keys: {missing}")
-    
+
     if push_to_hub:
         logger.info(f"Pushing to hub as {push_to_hub}")
         feature_extractor.push_to_hub(push_to_hub)
