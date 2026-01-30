@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import torch
 import argparse
 import gc
 import json
@@ -21,14 +20,15 @@ import re
 from pathlib import Path
 from typing import Any
 
+import torch
 from safetensors.torch import load_file
 
 from transformers import (
     Qwen2Config,
     Qwen2TokenizerFast,
     VibeVoiceAcousticTokenizerFeatureExtractor,
-    VibeVoiceAsrEncoderConfig,
     VibeVoiceAsrConfig,
+    VibeVoiceAsrEncoderConfig,
     VibeVoiceAsrForConditionalGeneration,
     VibeVoiceAsrProcessor,
 )
@@ -118,11 +118,13 @@ def load_original_checkpoint(checkpoint_path: str | Path) -> dict[str, Any]:
     checkpoint_path = Path(checkpoint_path)
 
     if not checkpoint_path.is_dir():
-        raise ValueError(f"checkpoint_path must be a directory containing sharded safetensors files, got: {checkpoint_path}")
+        raise ValueError(
+            f"checkpoint_path must be a directory containing sharded safetensors files, got: {checkpoint_path}"
+        )
 
     # Load sharded safetensors checkpoint
     index_path = checkpoint_path / "model.safetensors.index.json"
-    
+
     if not index_path.exists():
         raise FileNotFoundError(
             f"Could not find 'model.safetensors.index.json' in {checkpoint_path}. "
@@ -132,11 +134,11 @@ def load_original_checkpoint(checkpoint_path: str | Path) -> dict[str, Any]:
     logger.info(f"Loading sharded checkpoint from {checkpoint_path}")
     with open(index_path, "r") as f:
         index = json.load(f)
-    
+
     state_dict = {}
     # Get unique shard files
     shard_files = sorted(set(index["weight_map"].values()))
-    
+
     for shard_file in shard_files:
         shard_path = checkpoint_path / shard_file
         logger.info(f"Loading shard: {shard_file}")
@@ -148,7 +150,9 @@ def load_original_checkpoint(checkpoint_path: str | Path) -> dict[str, Any]:
 
 def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrConfig:
     checkpoint_path = Path(checkpoint_path)
-    config_path = checkpoint_path / "config.json" if checkpoint_path.is_dir() else checkpoint_path.parent / "config.json"
+    config_path = (
+        checkpoint_path / "config.json" if checkpoint_path.is_dir() else checkpoint_path.parent / "config.json"
+    )
 
     if config_path.exists():
         with open(config_path, "r") as f:
@@ -174,9 +178,20 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
         if "fix_std" in acoustic_config_dict:
             # passed to main model config
             acoustic_vae_std = acoustic_config_dict.pop("fix_std") / 0.8
-        for key in ["decoder_depths", "decoder_n_filters", "decoder_ratios", "std_dist_type",
-                    "pad_mode", "causal", "mixer_layer", "layernorm", "disable_last_norm",
-                    "conv_norm", "corpus_normalize", "layernorm_elementwise_affine"]:
+        for key in [
+            "decoder_depths",
+            "decoder_n_filters",
+            "decoder_ratios",
+            "std_dist_type",
+            "pad_mode",
+            "causal",
+            "mixer_layer",
+            "layernorm",
+            "disable_last_norm",
+            "conv_norm",
+            "corpus_normalize",
+            "layernorm_elementwise_affine",
+        ]:
             acoustic_config_dict.pop(key, None)
 
         acoustic_config = VibeVoiceAsrEncoderConfig(**acoustic_config_dict)
@@ -197,9 +212,21 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
             semantic_config_dict["hidden_size"] = semantic_config_dict.pop("vae_dim")
         if "conv_bias" in semantic_config_dict:
             semantic_config_dict["bias"] = semantic_config_dict.pop("conv_bias")
-        for key in ["decoder_depths", "decoder_n_filters", "decoder_ratios", "std_dist_type", "fix_std",
-                    "pad_mode", "causal", "mixer_layer", "layernorm", "disable_last_norm",
-                    "conv_norm", "corpus_normalize", "layernorm_elementwise_affine"]:
+        for key in [
+            "decoder_depths",
+            "decoder_n_filters",
+            "decoder_ratios",
+            "std_dist_type",
+            "fix_std",
+            "pad_mode",
+            "causal",
+            "mixer_layer",
+            "layernorm",
+            "disable_last_norm",
+            "conv_norm",
+            "corpus_normalize",
+            "layernorm_elementwise_affine",
+        ]:
             semantic_config_dict.pop(key, None)
 
         semantic_config = VibeVoiceAsrEncoderConfig(**semantic_config_dict)
@@ -262,7 +289,6 @@ This is a <|AUDIO_DURATION|> seconds audio, please transcribe it with these keys
 
 
 def convert_checkpoint(checkpoint_path, output_dir, push_to_hub, bfloat16):
-
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -273,11 +299,15 @@ def convert_checkpoint(checkpoint_path, output_dir, push_to_hub, bfloat16):
     original_state_dict = load_original_checkpoint(checkpoint_path)
 
     logger.info("Number of parameters in original state dict: " + str(len(original_state_dict)))
-    num_acoustic_decoder_params = sum(1 for k in original_state_dict.keys() if k.startswith("model.acoustic_tokenizer.decoder."))
+    num_acoustic_decoder_params = sum(
+        1 for k in original_state_dict.keys() if k.startswith("model.acoustic_tokenizer.decoder.")
+    )
 
     # remove acoustic tokenizer decoder parameters
     logger.info(f"Number of (unused) acoustic tokenizer decoder parameters: {num_acoustic_decoder_params}")
-    original_state_dict = {k: v for k, v in original_state_dict.items() if not k.startswith("model.acoustic_tokenizer.decoder.")}
+    original_state_dict = {
+        k: v for k, v in original_state_dict.items() if not k.startswith("model.acoustic_tokenizer.decoder.")
+    }
 
     logger.info("Converting state dict")
     converted_state_dict = convert_state_dict(original_state_dict)

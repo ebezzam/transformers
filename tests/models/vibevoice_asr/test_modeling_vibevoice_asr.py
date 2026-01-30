@@ -12,19 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import unittest
-
 import json
 import unittest
 from pathlib import Path
 
-import pytest
-
-from transformers import is_datasets_available, is_torch_available
-
 from transformers import (
     VibeVoiceAsrConfig,
     VibeVoiceAsrForConditionalGeneration,
+    is_datasets_available,
+    is_torch_available,
 )
 from transformers.testing_utils import (
     require_torch,
@@ -44,7 +40,7 @@ if is_torch_available():
     import torch
 
 
-class VibeVoiceASRModelTester:
+class VibeVoiceAsrModelTester:
     """
     Builds a tiny VibeVoice ASR config and synthetic inputs for testing.
     """
@@ -178,8 +174,8 @@ class VibeVoiceAsrModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.Te
     fx_compatible = False
 
     def setUp(self):
-        self.model_tester = VibeVoiceASRModelTester(self)
-        self.config_tester = ConfigTester(self, config_class=VibeVoiceASRConfig, has_text_modality=False)
+        self.model_tester = VibeVoiceAsrModelTester(self)
+        self.config_tester = ConfigTester(self, config_class=VibeVoiceAsrConfig, has_text_modality=False)
 
     def test_config(self):
         self.config_tester.run_common_tests()
@@ -257,7 +253,7 @@ class VibeVoiceAsrForConditionalGenerationIntegrationTest(unittest.TestCase):
         exp_txt = raw["transcriptions"]
 
         samples = self._load_datasamples(1)
-        
+
         conversation = [
             {
                 "role": "user",
@@ -274,12 +270,12 @@ class VibeVoiceAsrForConditionalGenerationIntegrationTest(unittest.TestCase):
             self.checkpoint, device_map=torch_device, torch_dtype=torch.bfloat16
         ).eval()
 
-        batch = self.processor.apply_chat_template(
-            conversation, tokenize=True, return_dict=True
-        ).to(model.device, dtype=model.dtype)
-        
+        batch = self.processor.apply_chat_template(conversation, tokenize=True, return_dict=True).to(
+            model.device, dtype=model.dtype
+        )
+
         torch.testing.assert_close(batch["input_ids"].cpu(), exp_inp_ids)
-        
+
         seq = model.generate(**batch, max_new_tokens=512)
         inp_len = batch["input_ids"].shape[1]
         gen_ids = seq[:, inp_len:] if seq.shape[1] >= inp_len else seq

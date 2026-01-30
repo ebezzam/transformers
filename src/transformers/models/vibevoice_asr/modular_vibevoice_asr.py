@@ -29,7 +29,7 @@ from ..vibevoice_acoustic_tokenizer.modeling_vibevoice_acoustic_tokenizer import
     VibeVoiceAcousticTokenizerModel,
     VibeVoiceAcousticTokenizerPreTrainedModel,
 )
-from .configuration_vibevoice_asr import VibeVoiceAsrEncoderConfig, VibeVoiceAsrConfig
+from .configuration_vibevoice_asr import VibeVoiceAsrConfig, VibeVoiceAsrEncoderConfig
 
 
 class VibeVoiceAsrRMSNorm(Qwen2RMSNorm):
@@ -52,7 +52,7 @@ class VibeVoiceAsrMultiModalProjector(nn.Module):
         x = self.norm(x)
         x = self.fc2(x)
         return x
-    
+
 
 @auto_docstring
 class VibeVoiceAsrPreTrainedModel(VibeVoiceAcousticTokenizerPreTrainedModel):
@@ -69,7 +69,6 @@ class VibeVoiceAsrPreTrainedModel(VibeVoiceAcousticTokenizerPreTrainedModel):
     _supports_quantized_cache = True
     _supports_static_cache = True
     _supports_attention_backend = True
-
 
 
 @dataclass
@@ -129,7 +128,6 @@ class VibeVoiceAsrEncoderModel(VibeVoiceAcousticTokenizerModel):
         )
 
 
-
 @auto_docstring(
     custom_intro="""
     The VibeVoice ASR model with a language modeling head for conditional generation (ASR tasks).
@@ -137,14 +135,17 @@ class VibeVoiceAsrEncoderModel(VibeVoiceAcousticTokenizerModel):
 )
 # TODO modular from Voxtral or AudioFlamingo3? for all the helper methods
 class VibeVoiceAsrForConditionalGeneration(VibeVoiceAsrPreTrainedModel, GenerationMixin):
-
     def __init__(self, config: VibeVoiceAsrConfig):
         super().__init__(config)
         self.vocab_size = config.text_config.vocab_size
         self.acoustic_tokenizer = AutoModel.from_config(config.acoustic_tokenizer_config)
         self.semantic_tokenizer = AutoModel.from_config(config.semantic_tokenizer_config)
-        self.acoustic_connector = VibeVoiceAsrMultiModalProjector(config.acoustic_tokenizer_config.hidden_size, config.text_config.hidden_size)
-        self.semantic_connector = VibeVoiceAsrMultiModalProjector(config.semantic_tokenizer_config.hidden_size, config.text_config.hidden_size)
+        self.acoustic_connector = VibeVoiceAsrMultiModalProjector(
+            config.acoustic_tokenizer_config.hidden_size, config.text_config.hidden_size
+        )
+        self.semantic_connector = VibeVoiceAsrMultiModalProjector(
+            config.semantic_tokenizer_config.hidden_size, config.text_config.hidden_size
+        )
         self.language_model = AutoModelForCausalLM.from_config(config.text_config)
         self.post_init()
 
@@ -219,14 +220,18 @@ class VibeVoiceAsrForConditionalGeneration(VibeVoiceAsrPreTrainedModel, Generati
 
                 # Encode chunk for acoustic tokenizer
                 acoustic_encoder_output = self.acoustic_tokenizer(
-                    chunk, padding_cache=acoustic_encoder_cache, use_cache=True,
+                    chunk,
+                    padding_cache=acoustic_encoder_cache,
+                    use_cache=True,
                 )
                 acoustic_latents.append(acoustic_encoder_output.latents)
                 acoustic_encoder_cache = acoustic_encoder_output.padding_cache
 
                 # Encode chunk for semantic tokenizer
                 semantic_encoder_output = self.semantic_tokenizer(
-                    chunk, padding_cache=semantic_encoder_cache, use_cache=True,
+                    chunk,
+                    padding_cache=semantic_encoder_cache,
+                    use_cache=True,
                 )
                 semantic_latents.append(semantic_encoder_output.latents)
                 semantic_encoder_cache = semantic_encoder_output.padding_cache

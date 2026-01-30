@@ -13,13 +13,13 @@
 # limitations under the License.
 
 import re
+
 import numpy as np
 
 from ...audio_utils import AudioInput, make_list_of_audio
 from ...feature_extraction_utils import BatchFeature
 from ...processing_utils import ProcessingKwargs, ProcessorMixin, Unpack
 from ...tokenization_utils_base import TextInput
-
 
 
 class VibeVoiceAsrProcessorKwargs(ProcessingKwargs, total=False):
@@ -164,10 +164,10 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
             audio_lengths = data["padding_mask"].sum(dim=-1).cpu().numpy()
             audio_durations = audio_lengths / self.feature_extractor.sampling_rate
             for i in range(len(text)):
-                text[i] = text[i].replace(self.audio_duration_token, f'{audio_durations[i]:.2f}')
-            
+                text[i] = text[i].replace(self.audio_duration_token, f"{audio_durations[i]:.2f}")
+
             # Expand audio tokens in text
-            num_audio_tokens = (np.ceil(audio_lengths / audio_kwargs["pad_to_multiple_of"]).astype(int).tolist())
+            num_audio_tokens = np.ceil(audio_lengths / audio_kwargs["pad_to_multiple_of"]).astype(int).tolist()
             for i, num_tokens in enumerate(num_audio_tokens):
                 text[i] = re.sub(re.escape(self.audio_token), self.audio_token * num_tokens, text[i])
 

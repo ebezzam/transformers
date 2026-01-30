@@ -389,6 +389,7 @@ if TYPE_CHECKING:
     from .univnet import *
     from .upernet import *
     from .vaultgemma import *
+    from .vibevoice_asr import *
     from .video_llama_3 import *
     from .video_llava import *
     from .videomae import *
@@ -406,7 +407,6 @@ if TYPE_CHECKING:
     from .vitpose_backbone import *
     from .vits import *
     from .vivit import *
-    from .vibevoice_asr import *
     from .vjepa2 import *
     from .voxtral import *
     from .wav2vec2 import *

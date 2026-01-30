@@ -114,7 +114,7 @@ class VibeVoiceAsrConfig(PretrainedConfig):
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.
 
-    
+
     TODO update
     Args:
         acoustic_tokenizer_config (`Union[VibeVoiceAcousticTokenizerConfig, dict]`, *optional*):
@@ -182,7 +182,6 @@ class VibeVoiceAsrConfig(PretrainedConfig):
         tokenizer_chunk_size=1440000,
         **kwargs,
     ):
-
         if isinstance(acoustic_tokenizer_config, dict):
             acoustic_tokenizer_config["model_type"] = acoustic_tokenizer_config.get(
                 "model_type", "vibevoice_acoustic_tokenizer"
@@ -219,7 +218,6 @@ class VibeVoiceAsrConfig(PretrainedConfig):
         self.tokenizer_chunk_size = tokenizer_chunk_size
 
         super().__init__(**kwargs)
-
 
     @property
     def hidden_size(self):
