@@ -12,16 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import numpy as np
+
 from ...configuration_utils import PretrainedConfig
 from ..auto import CONFIG_MAPPING, AutoConfig
 
 
-class VibeVoiceSemanticTokenizerConfig(PretrainedConfig):
+# TODO use modular for this!!
+class VibeVoiceAsrEncoderConfig(PretrainedConfig):
     r"""
-    This is the configuration class to store the configuration of a [`VibeVoiceASRSemanticTokenizerModel`]. It is used to
-    instantiate a VibeVoice semantic tokenizer model according to the specified arguments, defining the model
+    This is the configuration class to store the configuration of a [`VibeVoiceAsrEncoderModel`]. It is used to
+    instantiate a VibeVoice encoder model according to the specified arguments, defining the model
     architecture. Instantiating a configuration with the defaults will yield a similar configuration to that of the
-    semantic tokenizer of [microsoft/VibeVoice-1.5B](https://huggingface.co/microsoft/VibeVoice-1.5B).
+    acoustic encoder of [microsoft/VibeVoice-ASR](https://huggingface.co/microsoft/VibeVoice-ASR).
 
     Args:
         channels (`int`, *optional*, defaults to 1):
@@ -51,24 +54,24 @@ class VibeVoiceSemanticTokenizerConfig(PretrainedConfig):
     Example:
 
     ```python
-    >>> from transformers import VibeVoiceASRSemanticTokenizerModel, VibeVoiceSemanticTokenizerConfig
+    >>> from transformers import VibeVoiceAsrEncoderModel, VibeVoiceAsrEncoderConfig
 
-    >>> # Initializing a VibeVoice Semantic Tokenizer configuration
-    >>> configuration = VibeVoiceSemanticTokenizerConfig()
+    >>> # Initializing a VibeVoice ASR Encoder configuration
+    >>> configuration = VibeVoiceAsrEncoderConfig()
 
     >>> # Initializing a model (with random weights)
-    >>> model = VibeVoiceASRSemanticTokenizerModel(configuration)
+    >>> model = VibeVoiceAsrEncoderModel(configuration)
 
     >>> # Accessing the model configuration
     >>> configuration = model.config
     ```"""
 
-    model_type = "vibevoice_semantic_tokenizer"
+    model_type = "vibevoice_asr_encoder"
 
     def __init__(
         self,
         channels=1,
-        hidden_size=128,
+        hidden_size=64,
         kernel_size=7,
         rms_norm_eps=1e-5,
         bias=True,
@@ -95,11 +98,14 @@ class VibeVoiceSemanticTokenizerConfig(PretrainedConfig):
         self.downsampling_ratios = downsampling_ratios
         self.depths = depths
 
+    @property
+    def hop_length(self) -> int:
+        return np.prod(self.downsampling_ratios)
 
 
-class VibeVoiceASRConfig(PretrainedConfig):
+class VibeVoiceAsrConfig(PretrainedConfig):
     r"""
-    This is the configuration class to store the configuration of a [`VibeVoiceASRForConditionalGeneration`]. It is used to instantiate a
+    This is the configuration class to store the configuration of a [`VibeVoiceAsrForConditionalGeneration`]. It is used to instantiate a
     VibeVoice ASR model according to the specified arguments, defining the model architecture. Instantiating a configuration
     with the defaults will yield a similar configuration to that of the VibeVoice ASR architecture.
 
@@ -108,6 +114,8 @@ class VibeVoiceASRConfig(PretrainedConfig):
     Configuration objects inherit from [`PretrainedConfig`] and can be used to control the model outputs. Read the
     documentation from [`PretrainedConfig`] for more information.
 
+    
+    TODO update
     Args:
         acoustic_tokenizer_config (`Union[VibeVoiceAcousticTokenizerConfig, dict]`, *optional*):
             The config object or dictionary of the acoustic tokenizer. This tokenizer extracts acoustic features from audio.
@@ -115,6 +123,12 @@ class VibeVoiceASRConfig(PretrainedConfig):
             The config object or dictionary of the semantic tokenizer. This tokenizer extracts semantic features from audio.
         text_config (`Union[AutoConfig, dict]`, *optional*, defaults to `Qwen2Config`):
             The config object or dictionary of the text backbone (language model).
+        acoustic_vae_std (`float`, *optional*, defaults to 0.625):
+            Standard deviation used during acoustic VAE sampling.
+        tokenizer_chunk_size (`int`, *optional*, defaults to 1440000):
+            The chunk size (in number of samples) to use when tokenizer audio inputs. Default corresponds to 60 seconds at 24kHz.
+
+
         audio_token_id (`int`, *optional*, defaults to 151669):
             The audio token index to encode the audio prompt.
         acoustic_vae_dim (`int`, *optional*, defaults to 64):
@@ -129,20 +143,20 @@ class VibeVoiceASRConfig(PretrainedConfig):
     Example:
 
     ```python
-    >>> from transformers import VibeVoiceASRForConditionalGeneration, VibeVoiceASRConfig, VibeVoiceAcousticTokenizerConfig, Qwen2Config
+    >>> from transformers import VibeVoiceAsrForConditionalGeneration, VibeVoiceAsrConfig, VibeVoiceAsrEncoderConfig, Qwen2Config
 
-    >>> # Initializing VibeVoice Acoustic Tokenizer configs
-    >>> acoustic_config = VibeVoiceAcousticTokenizerConfig()
-    >>> semantic_config = VibeVoiceAcousticTokenizerConfig()
+    >>> # Initializing VibeVoice acoustic and semantic encoder configs
+    >>> acoustic_config = VibeVoiceAsrEncoderConfig()
+    >>> semantic_config = VibeVoiceAsrEncoderConfig(hidden_size=128)
 
     >>> # Initializing a Qwen2 config
     >>> text_config = Qwen2Config()
 
     >>> # Initializing a VibeVoice ASR configuration
-    >>> configuration = VibeVoiceASRConfig(acoustic_config, semantic_config, text_config)
+    >>> configuration = VibeVoiceAsrConfig(acoustic_config, semantic_config, text_config)
 
     >>> # Initializing a model from the vibevoice_asr style configuration
-    >>> model = VibeVoiceASRForConditionalGeneration(configuration)
+    >>> model = VibeVoiceAsrForConditionalGeneration(configuration)
 
     >>> # Accessing the model configuration
     >>> configuration = model.config
@@ -161,20 +175,14 @@ class VibeVoiceASRConfig(PretrainedConfig):
         acoustic_tokenizer_config=None,
         semantic_tokenizer_config=None,
         text_config=None,
-        audio_token_id=151669,
-        acoustic_vae_dim=64,
-        semantic_vae_dim=128,
-        projector_hidden_act="gelu",
-        projector_bias=True,
+        audio_token_id=151648,
+        audio_bos_token_id=151646,
+        audio_eos_token_id=151647,
+        acoustic_vae_std=0.625,
+        tokenizer_chunk_size=1440000,
         **kwargs,
     ):
-        self.audio_token_id = audio_token_id
-        self.acoustic_vae_dim = acoustic_vae_dim
-        self.semantic_vae_dim = semantic_vae_dim
-        self.projector_hidden_act = projector_hidden_act
-        self.projector_bias = projector_bias
 
-        # Handle acoustic tokenizer config
         if isinstance(acoustic_tokenizer_config, dict):
             acoustic_tokenizer_config["model_type"] = acoustic_tokenizer_config.get(
                 "model_type", "vibevoice_acoustic_tokenizer"
@@ -183,75 +191,39 @@ class VibeVoiceASRConfig(PretrainedConfig):
                 **acoustic_tokenizer_config
             )
         elif acoustic_tokenizer_config is None:
-            acoustic_tokenizer_config = CONFIG_MAPPING["vibevoice_acoustic_tokenizer"]()
-
+            acoustic_tokenizer_config = CONFIG_MAPPING["vibevoice_asr_encoder"]()
         self.acoustic_tokenizer_config = acoustic_tokenizer_config
 
-        # Handle semantic tokenizer config
         if isinstance(semantic_tokenizer_config, dict):
             semantic_tokenizer_config["model_type"] = semantic_tokenizer_config.get(
-                "model_type", "vibevoice_acoustic_tokenizer"
+                "model_type", "vibevoice_asr_encoder"
             )
             semantic_tokenizer_config = CONFIG_MAPPING[semantic_tokenizer_config["model_type"]](
                 **semantic_tokenizer_config
             )
         elif semantic_tokenizer_config is None:
-            semantic_tokenizer_config = CONFIG_MAPPING["vibevoice_acoustic_tokenizer"]()
-
+            semantic_tokenizer_config = CONFIG_MAPPING["vibevoice_asr_encoder"](hidden_size=128)
         self.semantic_tokenizer_config = semantic_tokenizer_config
 
-        # Handle text config
         if isinstance(text_config, dict):
             text_config["model_type"] = text_config.get("model_type", "qwen2")
             text_config = CONFIG_MAPPING[text_config["model_type"]](**text_config)
         elif text_config is None:
             text_config = CONFIG_MAPPING["qwen2"]()
-
         self.text_config = text_config
+
+        self.audio_token_id = audio_token_id
+        self.audio_bos_token_id = audio_bos_token_id
+        self.audio_eos_token_id = audio_eos_token_id
+        self.acoustic_vae_std = acoustic_vae_std
+        self.tokenizer_chunk_size = tokenizer_chunk_size
 
         super().__init__(**kwargs)
 
-    def get_text_config(self, decoder=False):
-        """
-        Returns the text config for this model.
-
-        This allows vLLM and other frameworks to correctly determine hidden_size, num_attention_heads,
-        and other properties needed for memory profiling and model execution.
-
-        Returns:
-            The text configuration (Qwen2Config) which contains hidden_size, etc.
-        """
-        return self.text_config
-
-    @property
-    def vocab_size(self):
-        """Return vocab_size from text config for generation compatibility."""
-        return self.text_config.vocab_size
-
-    @property
-    def num_attention_heads(self):
-        """Return num_attention_heads from text config for compatibility."""
-        return self.text_config.num_attention_heads
-
-    @property
-    def num_key_value_heads(self):
-        """Return num_key_value_heads from text config for compatibility."""
-        return self.text_config.num_key_value_heads
 
     @property
     def hidden_size(self):
-        """Return hidden_size from text config for model compatibility."""
         return self.text_config.hidden_size
 
-    @property
-    def num_hidden_layers(self):
-        """Return num_hidden_layers from text config for compatibility."""
-        return self.text_config.num_hidden_layers
 
-    @property
-    def head_dim(self):
-        """Return head_dim from text config for compatibility."""
-        return getattr(self.text_config, "head_dim", self.hidden_size // self.num_attention_heads)
-
-
-__all__ = ["VibeVoiceASRConfig", "VibeVoiceSemanticTokenizerConfig"]
+__all__ = ["VibeVoiceAsrConfig", "VibeVoiceAsrEncoderConfig"]

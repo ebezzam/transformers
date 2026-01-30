@@ -1,4 +1,4 @@
-# Copyright 2026 Microsoft and the HuggingFace Inc. team. All rights reserved.
+# Copyright 2026 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,17 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Testing suite for the PyTorch VibeVoice ASR model."""
 
 import unittest
 
+import json
+import unittest
+from pathlib import Path
+
 import pytest
 
+from transformers import is_datasets_available, is_torch_available
+
 from transformers import (
-    VibeVoiceASRConfig,
-    VibeVoiceASRForConditionalGeneration,
-    VibeVoiceAcousticTokenizerConfig,
-    is_torch_available,
+    VibeVoiceAsrConfig,
+    VibeVoiceAsrForConditionalGeneration,
 )
 from transformers.testing_utils import (
     require_torch,
@@ -33,6 +36,9 @@ from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
 
+
+if is_datasets_available():
+    from datasets import Audio, load_dataset
 
 if is_torch_available():
     import torch
@@ -120,7 +126,7 @@ class VibeVoiceASRModelTester:
         return config, input_ids, attention_mask, speech_tensors, acoustic_input_mask
 
     def get_config(self):
-        return VibeVoiceASRConfig(
+        return VibeVoiceAsrConfig(
             acoustic_tokenizer_config=self.acoustic_tokenizer_config,
             semantic_tokenizer_config=self.semantic_tokenizer_config,
             text_config=self.text_config,
@@ -130,7 +136,7 @@ class VibeVoiceASRModelTester:
         )
 
     def create_and_check_model(self, config, input_ids, attention_mask, speech_tensors, acoustic_input_mask):
-        model = VibeVoiceASRForConditionalGeneration(config=config)
+        model = VibeVoiceAsrForConditionalGeneration(config=config)
         model.to(torch_device)
         model.eval()
 
@@ -163,8 +169,8 @@ class VibeVoiceASRModelTester:
 
 
 @require_torch
-class VibeVoiceASRModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
-    all_model_classes = (VibeVoiceASRForConditionalGeneration,) if is_torch_available() else ()
+class VibeVoiceAsrModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
+    all_model_classes = (VibeVoiceAsrForConditionalGeneration,) if is_torch_available() else ()
     test_head_masking = False
     test_pruning = False
     test_resize_embeddings = False
@@ -205,9 +211,79 @@ class VibeVoiceASRModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.Te
 
 
 @require_torch
-class VibeVoiceASRModelIntegrationTest(unittest.TestCase):
+class VibeVoiceAsrForConditionalGenerationIntegrationTest(unittest.TestCase):
+    _dataset = None
+
+    @classmethod
+    def setUp(cls):
+        from transformers import AutoProcessor
+        from transformers.testing_utils import cleanup
+
+        cleanup(torch_device, gc_collect=True)
+        cls.checkpoint = "bezzam/VibeVoice-ASR-7B"
+        cls.processor = AutoProcessor.from_pretrained(cls.checkpoint)
+
+    def tearDown(self):
+        from transformers.testing_utils import cleanup
+
+        cleanup(torch_device, gc_collect=True)
+
+    @classmethod
+    def _load_dataset(cls):
+        # Lazy loading of the dataset. Because it is a class method, it will only be loaded once per pytest process.
+        if cls._dataset is None:
+            cls._dataset = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
+            cls._dataset = cls._dataset.cast_column(
+                "audio", Audio(sampling_rate=cls.processor.feature_extractor.sampling_rate)
+            )
+
+    def _load_datasamples(self, num_samples):
+        self._load_dataset()
+        ds = self._dataset
+        speech_samples = ds.sort("id")[:num_samples]["audio"]
+        return [x["array"] for x in speech_samples]
+
     @slow
-    @unittest.skip("Model not yet available on Hub")
-    def test_inference(self):
-        # TODO: Add integration test once model is available on Hub
-        pass
+    def test_integration_single(self):
+        """
+        reproducer: https://gist.github.com/ebezzam/e1200bcecdc29e87dadd9d8423ae7ecb#file-reproducer_vibevoice_asr-py
+        """
+
+        path = Path(__file__).parent.parent.parent / "fixtures/vibevoice_asr/expected_results_single.json"
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        exp_inp_ids = torch.tensor(raw["input_ids"])
+        exp_gen_ids = torch.tensor(raw["generated_ids"])
+        exp_txt = raw["transcriptions"]
+
+        samples = self._load_datasamples(1)
+        
+        conversation = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "audio",
+                        "audio": samples[0],
+                    },
+                ],
+            }
+        ]
+
+        model = VibeVoiceAsrForConditionalGeneration.from_pretrained(
+            self.checkpoint, device_map=torch_device, torch_dtype=torch.bfloat16
+        ).eval()
+
+        batch = self.processor.apply_chat_template(
+            conversation, tokenize=True, return_dict=True
+        ).to(model.device, dtype=model.dtype)
+        
+        torch.testing.assert_close(batch["input_ids"].cpu(), exp_inp_ids)
+        
+        seq = model.generate(**batch, max_new_tokens=512)
+        inp_len = batch["input_ids"].shape[1]
+        gen_ids = seq[:, inp_len:] if seq.shape[1] >= inp_len else seq
+
+        torch.testing.assert_close(gen_ids.cpu(), exp_gen_ids)
+        txt = self.processor.batch_decode(gen_ids, skip_special_tokens=True)
+        self.assertListEqual(txt, exp_txt)

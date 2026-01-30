@@ -31,17 +31,16 @@ from ...generation import GenerationMixin
 from ...integrations import use_kernel_forward_from_hub
 from ...modeling_outputs import CausalLMOutputWithPast, ModelOutput
 from ...modeling_utils import PreTrainedModel
-from ...processing_utils import Unpack
-from ...utils import TransformersKwargs, auto_docstring, can_return_tuple
+from ...utils import auto_docstring, can_return_tuple
 from ..auto import AutoModel, AutoModelForCausalLM
-from .configuration_vibevoice_asr import VibeVoiceASRConfig, VibeVoiceSemanticTokenizerConfig
+from .configuration_vibevoice_asr import VibeVoiceAsrConfig, VibeVoiceAsrEncoderConfig
 
 
 @use_kernel_forward_from_hub("RMSNorm")
-class VibeVoiceRMSNorm(nn.Module):
+class VibeVoiceAsrRMSNorm(nn.Module):
     def __init__(self, hidden_size, eps: float = 1e-6) -> None:
         """
-        VibeVoiceRMSNorm is equivalent to T5LayerNorm
+        VibeVoiceAsrRMSNorm is equivalent to T5LayerNorm
         """
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
@@ -58,13 +57,13 @@ class VibeVoiceRMSNorm(nn.Module):
         return f"{tuple(self.weight.shape)}, eps={self.variance_epsilon}"
 
 
-class VibeVoiceASRConv1dPaddingCache:
+class VibeVoiceAsrConv1dPaddingCache:
     """
-    Padding cache for VibeVoiceASRConv1d causal convolutions in order to support streaming via cache padding.
+    Padding cache for VibeVoiceAsrConv1d causal convolutions in order to support streaming via cache padding.
     See: https://huggingface.co/papers/2005.06720 & https://huggingface.co/papers/2204.07064
 
     A padding cache is a list of cached partial hidden states for each convolution layer.
-    Hidden states are cached from the previous call to the VibeVoiceASRConv1d forward pass, given the padding size.
+    Hidden states are cached from the previous call to the VibeVoiceAsrConv1d forward pass, given the padding size.
     """
 
     def __init__(
@@ -152,11 +151,11 @@ class VibeVoiceASRConv1dPaddingCache:
         return current_cache
 
 
-class VibeVoiceASRMultiModelProjector(nn.Module):
+class VibeVoiceAsrMultiModalProjector(nn.Module):
     def __init__(self, input_dim, output_dim):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, output_dim)
-        self.norm = VibeVoiceRMSNorm(output_dim, eps=1e-6)
+        self.norm = VibeVoiceAsrRMSNorm(output_dim, eps=1e-6)
         self.fc2 = nn.Linear(output_dim, output_dim)
 
     def forward(self, features):
@@ -166,28 +165,7 @@ class VibeVoiceASRMultiModelProjector(nn.Module):
         return x
 
 
-@use_kernel_forward_from_hub("RMSNorm")
-class VibeVoiceASRRMSNorm(nn.Module):
-    def __init__(self, hidden_size, eps=1e-6):
-        """
-        VibeVoiceASRRMSNorm is equivalent to T5LayerNorm
-        """
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
-        self.variance_epsilon = eps
-
-    def forward(self, hidden_states):
-        input_dtype = hidden_states.dtype
-        hidden_states = hidden_states.to(torch.float32)
-        variance = hidden_states.pow(2).mean(-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
-        return self.weight * hidden_states.to(input_dtype)
-
-    def extra_repr(self):
-        return f"{tuple(self.weight.shape)}, eps={self.variance_epsilon}"
-
-
-class VibeVoiceASRFeedForward(nn.Module):
+class VibeVoiceAsrFeedForward(nn.Module):
     def __init__(self, config, hidden_size):
         super().__init__()
         self.linear1 = nn.Linear(hidden_size, config.ffn_expansion * hidden_size, bias=config.bias)
@@ -198,7 +176,7 @@ class VibeVoiceASRFeedForward(nn.Module):
         return self.linear2(self.activation(self.linear1(hidden_states)))
 
 
-class VibeVoiceASRCausalConv1d(nn.Module):
+class VibeVoiceAsrCausalConv1d(nn.Module):
     """Conv1d with built-in causal padding and optional streaming support through a cache."""
 
     def __init__(
@@ -227,7 +205,7 @@ class VibeVoiceASRCausalConv1d(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        padding_cache: VibeVoiceASRConv1dPaddingCache | None = None,
+        padding_cache: VibeVoiceAsrConv1dPaddingCache | None = None,
     ) -> torch.Tensor:
         if padding_cache is not None:
             layer_padding = padding_cache.update(hidden_states, self.layer_idx)
@@ -244,18 +222,18 @@ class VibeVoiceASRCausalConv1d(nn.Module):
         return self.conv(hidden_states)
 
 
-class VibeVoiceASRConvNext1dLayer(nn.Module):
+class VibeVoiceAsrConvNext1dLayer(nn.Module):
     """ConvNeXt-like block adapted for 1D convolutions."""
 
     def __init__(self, config, hidden_size, dilation=1, stride=1, layer_idx=None):
         super().__init__()
 
-        self.norm = VibeVoiceASRRMSNorm(hidden_size, eps=config.rms_norm_eps)
-        self.ffn_norm = VibeVoiceASRRMSNorm(hidden_size, eps=config.rms_norm_eps)
-        self.ffn = VibeVoiceASRFeedForward(config, hidden_size)
+        self.norm = VibeVoiceAsrRMSNorm(hidden_size, eps=config.rms_norm_eps)
+        self.ffn_norm = VibeVoiceAsrRMSNorm(hidden_size, eps=config.rms_norm_eps)
+        self.ffn = VibeVoiceAsrFeedForward(config, hidden_size)
         self.gamma = nn.Parameter(config.layer_scale_init_value * torch.ones(hidden_size), requires_grad=True)
         self.ffn_gamma = nn.Parameter(config.layer_scale_init_value * torch.ones(hidden_size), requires_grad=True)
-        self.mixer = VibeVoiceASRCausalConv1d(
+        self.mixer = VibeVoiceAsrCausalConv1d(
             in_channels=hidden_size,
             out_channels=hidden_size,
             kernel_size=config.kernel_size,
@@ -283,11 +261,11 @@ class VibeVoiceASRConvNext1dLayer(nn.Module):
 
 
 @auto_docstring
-class VibeVoiceASRPreTrainedModel(PreTrainedModel):
-    config: VibeVoiceASRConfig
+class VibeVoiceAsrPreTrainedModel(PreTrainedModel):
+    config: VibeVoiceAsrConfig
     base_model_prefix = "model"
     main_input_name = "input_ids"
-    _no_split_modules = ["VibeVoiceEncoderLayer"]
+    _no_split_modules = ["VibeVoiceAsrEncoderLayer"]
     input_modalities = ("audio", "text")
     supports_gradient_checkpointing = True
     _skip_keys_device_placement = "past_key_values"
@@ -300,31 +278,31 @@ class VibeVoiceASRPreTrainedModel(PreTrainedModel):
 
     def _init_weights(self, module):
         super()._init_weights(module)
-        if isinstance(module, VibeVoiceASRConvNext1dLayer):
+        if isinstance(module, VibeVoiceAsrConvNext1dLayer):
             init.constant_(module.gamma, self.config.layer_scale_init_value)
             init.constant_(module.ffn_gamma, self.config.layer_scale_init_value)
 
 
 @dataclass
 @auto_docstring
-class VibeVoiceASRSemanticTokenizerOutput(ModelOutput):
+class VibeVoiceAsrEncoderOutput(ModelOutput):
     """
     latents (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
         Projected latents (continuous representations for semantic tokens) at the output of the encoder.
-    padding_cache (`VibeVoiceASRConv1dPaddingCache`, *optional*, returned when `use_cache=True` is passed):
-        A [`VibeVoiceASRConv1dPaddingCache`] instance containing cached convolution states for each layer that
+    padding_cache (`VibeVoiceAsrConv1dPaddingCache`, *optional*, returned when `use_cache=True` is passed):
+        A [`VibeVoiceAsrConv1dPaddingCache`] instance containing cached convolution states for each layer that
         can be reused for streaming mode.
     """
 
     latents: torch.FloatTensor = None
-    padding_cache: Optional["VibeVoiceASRConv1dPaddingCache"] = None
+    padding_cache: Optional["VibeVoiceAsrConv1dPaddingCache"] = None
 
 
-class VibeVoiceASREncoderStem(nn.Module):
+class VibeVoiceAsrEncoderStem(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        self.conv = VibeVoiceASRCausalConv1d(
+        self.conv = VibeVoiceAsrCausalConv1d(
             in_channels=config.channels,
             out_channels=config.n_filters,
             kernel_size=config.kernel_size,
@@ -333,7 +311,7 @@ class VibeVoiceASREncoderStem(nn.Module):
         )
         self.stage = nn.ModuleList(
             [
-                VibeVoiceASRConvNext1dLayer(
+                VibeVoiceAsrConvNext1dLayer(
                     config,
                     hidden_size=config.n_filters,
                     layer_idx=layer_idx,
@@ -349,7 +327,7 @@ class VibeVoiceASREncoderStem(nn.Module):
         return hidden_states
 
 
-class VibeVoiceASREncoderLayer(nn.Module):
+class VibeVoiceAsrEncoderLayer(nn.Module):
     def __init__(self, config, stage_idx):
         super().__init__()
 
@@ -357,7 +335,7 @@ class VibeVoiceASREncoderLayer(nn.Module):
         layer_idx = sum(depth + 1 for depth in config.depths[:depth_idx])
         intermediate_channels = int(config.n_filters * (2 ** (depth_idx)))
 
-        self.conv = VibeVoiceASRCausalConv1d(
+        self.conv = VibeVoiceAsrCausalConv1d(
             in_channels=int(config.n_filters * (2**stage_idx)),
             out_channels=intermediate_channels,
             kernel_size=int(config.downsampling_ratios[stage_idx] * 2),
@@ -367,7 +345,7 @@ class VibeVoiceASREncoderLayer(nn.Module):
         )
         self.stage = nn.ModuleList(
             [
-                VibeVoiceASRConvNext1dLayer(config, hidden_size=intermediate_channels, layer_idx=layer_idx + offset)
+                VibeVoiceAsrConvNext1dLayer(config, hidden_size=intermediate_channels, layer_idx=layer_idx + offset)
                 for offset in range(1, config.depths[depth_idx] + 1)
             ]
         )
@@ -379,21 +357,38 @@ class VibeVoiceASREncoderLayer(nn.Module):
         return hidden_states
 
 
-class VibeVoiceASREncoder(nn.Module):
+class VibeVoiceAsrEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        self.stem = VibeVoiceASREncoderStem(config)
+        self.stem = VibeVoiceAsrEncoderStem(config)
         self.conv_layers = nn.ModuleList(
-            [VibeVoiceASREncoderLayer(config, stage_idx) for stage_idx in range(len(config.downsampling_ratios))]
+            [VibeVoiceAsrEncoderLayer(config, stage_idx) for stage_idx in range(len(config.downsampling_ratios))]
         )
-        self.head = VibeVoiceASRCausalConv1d(
+        self.head = VibeVoiceAsrCausalConv1d(
             in_channels=int(config.n_filters * (2 ** len(config.downsampling_ratios))),
             out_channels=config.hidden_size,
             kernel_size=config.kernel_size,
             bias=config.bias,
             layer_idx=sum(depth + 1 for depth in config.depths),
         )
+
+        # Parameters for cache creation
+        self.num_conv_layers = sum(depth + 1 for depth in config.depths) + 1
+        self.per_conv_layer_padding = [self.stem.conv.causal_padding]
+        self.per_conv_layer_in_channels = [self.stem.conv.conv.in_channels]
+        self.per_conv_layer_padding.extend([block.mixer.causal_padding for block in self.stem.stage])
+        self.per_conv_layer_in_channels.extend([block.mixer.conv.in_channels for block in self.stem.stage])
+
+        for layer in self.conv_layers:
+            self.per_conv_layer_padding.append(layer.conv.causal_padding)
+            self.per_conv_layer_in_channels.append(layer.conv.conv.in_channels)
+            self.per_conv_layer_padding.extend([block.mixer.causal_padding for block in layer.stage])
+            self.per_conv_layer_in_channels.extend([block.mixer.conv.in_channels for block in layer.stage])
+
+        self.per_conv_layer_padding.append(self.head.causal_padding)
+        self.per_conv_layer_in_channels.append(self.head.conv.in_channels)
+        self.per_conv_layer_padding_mode = ["constant" for _ in self.per_conv_layer_padding]
 
     def forward(self, hidden_states, padding_cache=None):
         hidden_states = self.stem(hidden_states, padding_cache=padding_cache)
@@ -405,33 +400,30 @@ class VibeVoiceASREncoder(nn.Module):
 
 @auto_docstring(
     custom_intro="""
-    Semantic tokenizer which only encodes audio into semantic tokens, namely no decoding.
+    Tokenizer which only encodes audio into latent representations.
     """
 )
-class VibeVoiceASRSemanticTokenizerModel(VibeVoiceASRPreTrainedModel):
-    config: VibeVoiceSemanticTokenizerConfig
-    base_model_prefix = "vibevoice_asr_semantic_tokenizer"
-    main_input_name = "audio"
-    _no_split_modules = ["VibeVoiceASRSemanticTokenizerEncoder"]
+class VibeVoiceAsrEncoderModel(VibeVoiceAsrPreTrainedModel):
+    config: VibeVoiceAsrEncoderConfig
 
     def __init__(self, config):
         super().__init__(config)
-        self.encoder = VibeVoiceASREncoder(config)
+        self.encoder = VibeVoiceAsrEncoder(config)
         self.post_init()
 
     @can_return_tuple
     @auto_docstring
-    def encode(self, audio, padding_cache=None, use_cache=None):
+    def forward(self, audio, padding_cache=None, use_cache=None, **kwargs):
         r"""
         audio (`torch.FloatTensor` of shape `(batch_size, channels, sequence_length)`):
             Input audio waveform to be encoded into latent representations.
-        padding_cache (`VibeVoiceASRConv1dPaddingCache`, *optional*):
+        padding_cache (`VibeVoiceAsrConv1dPaddingCache`, *optional*):
             Cache object for streaming mode to maintain convolution states across layers.
         use_cache (`bool`, *optional*):
             Whether to use caching for convolution states.
         """
         if use_cache and padding_cache is None:
-            padding_cache = VibeVoiceASRConv1dPaddingCache(
+            padding_cache = VibeVoiceAsrConv1dPaddingCache(
                 num_layers=self.encoder.num_conv_layers,
                 per_layer_padding=self.encoder.per_conv_layer_padding,
                 per_layer_padding_mode=self.encoder.per_conv_layer_padding_mode,
@@ -439,7 +431,7 @@ class VibeVoiceASRSemanticTokenizerModel(VibeVoiceASRPreTrainedModel):
             )
         latents = self.encoder(audio, padding_cache=padding_cache)
 
-        return VibeVoiceASRSemanticTokenizerOutput(
+        return VibeVoiceAsrEncoderOutput(
             latents=latents,
             padding_cache=padding_cache if use_cache else None,
         )
@@ -450,19 +442,17 @@ class VibeVoiceASRSemanticTokenizerModel(VibeVoiceASRPreTrainedModel):
     The VibeVoice ASR model with a language modeling head for conditional generation (ASR tasks).
     """
 )
-# TODO modular from Voxtral or AudioFlamingo3?
-class VibeVoiceASRForConditionalGeneration(VibeVoiceASRPreTrainedModel, GenerationMixin):
-    _tied_weights_keys = ["lm_head.weight"]
-
-    def __init__(self, config: VibeVoiceASRConfig):
+# TODO modular from Voxtral or AudioFlamingo3? for all the helper methods
+class VibeVoiceAsrForConditionalGeneration(VibeVoiceAsrPreTrainedModel, GenerationMixin):
+    def __init__(self, config: VibeVoiceAsrConfig):
         super().__init__(config)
         self.vocab_size = config.text_config.vocab_size
         self.acoustic_tokenizer = AutoModel.from_config(config.acoustic_tokenizer_config)
         self.semantic_tokenizer = AutoModel.from_config(config.semantic_tokenizer_config)
-        self.acoustic_connector = VibeVoiceASRMultiModelProjector(
+        self.acoustic_connector = VibeVoiceAsrMultiModalProjector(
             config.acoustic_tokenizer_config.hidden_size, config.text_config.hidden_size
         )
-        self.semantic_connector = VibeVoiceASRMultiModelProjector(
+        self.semantic_connector = VibeVoiceAsrMultiModalProjector(
             config.semantic_tokenizer_config.hidden_size, config.text_config.hidden_size
         )
         self.language_model = AutoModelForCausalLM.from_config(config.text_config)
@@ -486,143 +476,94 @@ class VibeVoiceASRForConditionalGeneration(VibeVoiceASRPreTrainedModel, Generati
     def get_decoder(self):
         return self.language_model.get_decoder()
 
-    def tie_weights(self):
-        """Tie the weights between the input embeddings and the output embeddings."""
-        if getattr(self.config.text_config, "tie_word_embeddings", False):
-            output_embeddings = self.get_output_embeddings()
-            input_embeddings = self.get_input_embeddings()
-            if hasattr(input_embeddings, "weight"):
-                output_embeddings.weight = input_embeddings.weight
-            else:
-                output_embeddings.weight = input_embeddings
-
     @can_return_tuple
     @auto_docstring(
-        custom_intro="This method is used to encode audio input into features that can be used by the language model."
+        custom_intro="This method is used to encode audio input into embedding that can be used by the language model."
     )
-    def encode_speech(
+    def get_audio_features(
         self,
-        speech_tensors: torch.FloatTensor,
-        speech_masks: torch.BoolTensor | None = None,
-        speech_semantic_tensors: torch.FloatTensor | None = None,
-        streaming_segment_duration: float = 60.0,
-        **kwargs: Unpack[TransformersKwargs],
+        input_values: torch.FloatTensor,
+        padding_mask: torch.BoolTensor | None = None,
     ) -> torch.FloatTensor:
         r"""
-        speech_tensors (`torch.FloatTensor` of shape `(batch_size, num_samples)`):
+        input_values (`torch.FloatTensor` of shape `(batch_size, num_samples)`):
             Input audio tensor. Audio should be sampled at 24kHz.
-        speech_masks (`torch.BoolTensor` of shape `(batch_size, sequence_length)`, *optional*):
+        padding_mask (`torch.BoolTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Mask to avoid performing operations on padding feature indices.
-        speech_semantic_tensors (`torch.FloatTensor`, *optional*):
-            Pre-computed semantic tokens. If provided, semantic encoding is skipped.
-        streaming_segment_duration (`float`, *optional*, defaults to 60.0):
-            Segment duration in seconds for streaming processing of long audio.
         """
-        # Determine dtype
-        if hasattr(self.config, "torch_dtype") and self.config.torch_dtype is not None:
-            if isinstance(self.config.torch_dtype, str):
-                dtype = getattr(torch, self.config.torch_dtype)
-            else:
-                dtype = self.config.torch_dtype
-        else:
-            dtype = torch.float32
 
-        speech_tensors = speech_tensors.to(dtype)
-
-        # Ensure proper shape: (batch, samples)
-        if speech_tensors.ndim == 1:
-            speech_tensors = speech_tensors.unsqueeze(0)
-
-        batch_size, total_samples = speech_tensors.shape
-        sample_rate = 24000  # VibeVoice uses 24kHz
+        total_samples = input_values.shape[-1]
 
         # Calculate segment size in samples
-        segment_samples = int(streaming_segment_duration * sample_rate)
+        # TODO rename as seems like from tokenizer rather than acoustic tokenizer
+        segment_samples = self.config.tokenizer_chunk_size
 
-        # Decide whether to use streaming based on audio length
-        use_streaming = total_samples > segment_samples
+        # adjust padding mask according to tokenizer compression
+        num_audio_tokens = torch.ceil(padding_mask.sum(dim=-1) / self.acoustic_tokenizer.config.hop_length).to(
+            torch.int64
+        )
+        padding_mask = torch.arange(max(num_audio_tokens)) < num_audio_tokens[:, None].cpu()
 
+        # Using pre-trained tokenizers to extract acoustic and semantic features
         with torch.no_grad():
-            if not use_streaming:
-                # Short audio: direct processing
-                encoder_output = self.model.acoustic_tokenizer.encode(speech_tensors.unsqueeze(1))
-                audio_tokens = encoder_output.sample(dist_type=self.model.acoustic_tokenizer.std_dist_type)[0]
-                acoustic_features = self.model.acoustic_connector(audio_tokens)
+            acoustic_encoder_cache = None
+            semantic_encoder_cache = None
+            acoustic_latents = []
+            semantic_latents = []
 
-                # Encode semantic features
-                if speech_semantic_tensors is not None:
-                    semantic_features = self.model.semantic_connector(speech_semantic_tensors)
-                else:
-                    semantic_tokens = self.model.semantic_tokenizer.encode(speech_tensors.unsqueeze(1)).mean
-                    semantic_features = self.model.semantic_connector(semantic_tokens)
-            else:
-                # Long audio: streaming processing
-                # Import streaming cache from vibevoice_acoustic_tokenizer
-                from ..vibevoice_acoustic_tokenizer.modeling_vibevoice_acoustic_tokenizer import (
-                    VibeVoiceTokenizerEncoderOutput,
-                    VibeVoiceTokenizerStreamingCache,
+            def _iter_segments(total_length: int, segment_length: int):
+                """Iterate over audio segments with a given segment length."""
+                if segment_length <= 0:
+                    raise ValueError("segment_length must be positive")
+                for start in range(0, total_length, segment_length):
+                    end = min(start + segment_length, total_length)
+                    if end > start:
+                        yield start, end
+
+            # Process each segment
+            segments = list(_iter_segments(total_samples, segment_samples))
+            for seg_idx, (start, end) in enumerate(segments):
+                chunk = input_values[:, start:end].contiguous()
+                if chunk.numel() == 0:
+                    continue
+
+                # Encode chunk for acoustic tokenizer
+                acoustic_encoder_output = self.acoustic_tokenizer(
+                    chunk,
+                    padding_cache=acoustic_encoder_cache,
+                    use_cache=True,
                 )
+                acoustic_latents.append(acoustic_encoder_output.latents)
+                acoustic_encoder_cache = acoustic_encoder_output.padding_cache
 
-                acoustic_encoder_cache = VibeVoiceTokenizerStreamingCache()
-                semantic_encoder_cache = VibeVoiceTokenizerStreamingCache()
-                acoustic_mean_segments = []
-                semantic_mean_segments = []
-                sample_indices = torch.arange(batch_size, device=speech_tensors.device)
-
-                def _iter_segments(total_length: int, segment_length: int):
-                    """Iterate over audio segments with a given segment length."""
-                    if segment_length <= 0:
-                        raise ValueError("segment_length must be positive")
-                    for start in range(0, total_length, segment_length):
-                        end = min(start + segment_length, total_length)
-                        if end > start:
-                            yield start, end
-
-                # Process each segment
-                segments = list(_iter_segments(total_samples, segment_samples))
-                num_segments = len(segments)
-                for seg_idx, (start, end) in enumerate(segments):
-                    chunk = speech_tensors[:, start:end].contiguous()
-                    if chunk.numel() == 0:
-                        continue
-
-                    is_final = seg_idx == num_segments - 1
-
-                    # Encode chunk for acoustic tokenizer
-                    acoustic_encoder_output = self.model.acoustic_tokenizer.encode(
-                        chunk.unsqueeze(1),
-                        cache=acoustic_encoder_cache,
-                        sample_indices=sample_indices,
-                        use_cache=True,
-                        is_final_chunk=is_final,
-                    )
-                    acoustic_mean_segments.append(acoustic_encoder_output.mean)
-
-                    # Encode chunk for semantic tokenizer
-                    semantic_encoder_output = self.model.semantic_tokenizer.encode(
-                        chunk.unsqueeze(1),
-                        cache=semantic_encoder_cache,
-                        sample_indices=sample_indices,
-                        use_cache=True,
-                        is_final_chunk=is_final,
-                    )
-                    semantic_mean_segments.append(semantic_encoder_output.mean)
-
-                # Concatenate all means and sample once
-                acoustic_mean_full = torch.cat(acoustic_mean_segments, dim=1).contiguous()
-                acoustic_encoder_output = VibeVoiceTokenizerEncoderOutput(
-                    mean=acoustic_mean_full, std=self.model.acoustic_tokenizer.fix_std
+                # Encode chunk for semantic tokenizer
+                semantic_encoder_output = self.semantic_tokenizer(
+                    chunk,
+                    padding_cache=semantic_encoder_cache,
+                    use_cache=True,
                 )
-                audio_tokens = acoustic_encoder_output.sample(dist_type=self.model.acoustic_tokenizer.std_dist_type)[0]
-                acoustic_features = self.model.acoustic_connector(audio_tokens)
+                semantic_latents.append(semantic_encoder_output.latents)
+                semantic_encoder_cache = semantic_encoder_output.padding_cache
 
-                # Concatenate all semantic means
-                semantic_tokens = torch.cat(semantic_mean_segments, dim=1).contiguous()
-                semantic_features = self.model.semantic_connector(semantic_tokens)
+            # Concatenate all means and sample once
+            acoustic_mean_full = torch.cat(acoustic_latents, dim=1).contiguous()
+
+            # sample acoustic tokens
+            noise_std = self.config.acoustic_vae_std * torch.randn(
+                acoustic_mean_full.shape[0], device=acoustic_mean_full.device, dtype=acoustic_mean_full.dtype
+            )
+            acoustic_mean_full = acoustic_mean_full + noise_std[:, None, None] * torch.randn_like(acoustic_mean_full)
+
+            # Project acoustic tokens
+            acoustic_features = self.acoustic_connector(acoustic_mean_full)
+
+            # Concatenate all semantic means
+            semantic_tokens = torch.cat(semantic_latents, dim=1).contiguous()
+            semantic_features = self.semantic_connector(semantic_tokens)
 
             # Combine acoustic and semantic features
-            if speech_masks is not None:
-                combined_features = acoustic_features[speech_masks] + semantic_features[speech_masks]
+            if padding_mask is not None:
+                combined_features = acoustic_features[padding_mask] + semantic_features[padding_mask]
             else:
                 combined_features = acoustic_features + semantic_features
 
@@ -641,36 +582,27 @@ class VibeVoiceASRForConditionalGeneration(VibeVoiceASRPreTrainedModel, Generati
         use_cache: bool | None = None,
         cache_position: torch.LongTensor | None = None,
         logits_to_keep: int | torch.Tensor = 0,
-        # Speech-specific arguments
-        speech_tensors: torch.FloatTensor | None = None,
-        speech_masks: torch.BoolTensor | None = None,
-        speech_semantic_tensors: torch.FloatTensor | None = None,
-        acoustic_input_mask: torch.BoolTensor | None = None,
-        **kwargs: Unpack[TransformersKwargs],
+        input_values: torch.FloatTensor | None = None,
+        padding_mask: torch.BoolTensor | None = None,
+        **kwargs,
     ) -> CausalLMOutputWithPast:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Labels for computing the masked language modeling loss. Indices should either be in `[0, ...,
             config.vocab_size]` or -100 (see `input_ids` docstring). Tokens with indices set to `-100` are ignored
             (masked), the loss is only computed for the tokens with labels in `[0, ..., config.vocab_size]`.
-        speech_tensors (`torch.FloatTensor` of shape `(batch_size, num_samples)`, *optional*):
-            Input audio waveform tensor. Audio should be sampled at 24kHz.
-        speech_masks (`torch.BoolTensor` of shape `(batch_size, sequence_length)`, *optional*):
+        padding_mask (`torch.BoolTensor` of shape `(batch_size, sequence_length)`, *optional*):
             Mask to avoid performing operations on padding feature indices.
-        speech_semantic_tensors (`torch.FloatTensor`, *optional*):
-            Pre-computed semantic tokens.
-        acoustic_input_mask (`torch.BoolTensor` of shape `(batch_size, sequence_length)`, *optional*):
-            Mask indicating which positions in the input should be filled with acoustic features.
 
         Example:
 
         ```python
-        >>> from transformers import VibeVoiceASRForConditionalGeneration, AutoProcessor
+        >>> from transformers import VibeVoiceAsrForConditionalGeneration, AutoProcessor
         >>> import torch
 
         >>> model_id = "microsoft/VibeVoice-ASR"
         >>> processor = AutoProcessor.from_pretrained(model_id)
-        >>> model = VibeVoiceASRForConditionalGeneration.from_pretrained(model_id, device_map="auto")
+        >>> model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
 
         >>> # Prepare audio input
         >>> audio = torch.randn(16000 * 5)  # 5 seconds of audio at 16kHz
@@ -682,79 +614,30 @@ class VibeVoiceASRForConditionalGeneration(VibeVoiceASRPreTrainedModel, Generati
         >>> print(transcription)
         ```"""
 
-        return_dict = kwargs.get("return_dict", True)
-        use_cache = use_cache if use_cache is not None else getattr(self.config, "use_cache", False)
-
-        # Process inputs
-        if inputs_embeds is None and input_ids is not None:
+        if inputs_embeds is None:
             inputs_embeds = self.get_input_embeddings()(input_ids)
 
-        # If we have speech input and acoustic_input_mask, encode and insert speech features
-        if speech_tensors is not None and acoustic_input_mask is not None:
-            speech_features = self.encode_speech(
-                speech_tensors=speech_tensors,
-                speech_masks=speech_masks,
-                speech_semantic_tensors=speech_semantic_tensors,
-            )
-            # Clone to avoid in-place operation on leaf variable during training
-            inputs_embeds = inputs_embeds.clone()
-            inputs_embeds[acoustic_input_mask] = speech_features
+        if input_values is not None and input_ids is not None:
+            audio_embeds = self.get_audio_features(input_values=input_values, padding_mask=padding_mask)
 
-        # Forward through the model
-        outputs = self.model(
-            input_ids=None,
+            # replace text-audio token placeholders with audio embeddings
+            audio_token_mask = (input_ids == self.config.audio_token_id).unsqueeze(-1)
+            inputs_embeds = inputs_embeds.masked_scatter(
+                audio_token_mask.to(inputs_embeds.device), audio_embeds.to(inputs_embeds.device)
+            )
+
+        outputs: CausalLMOutputWithPast = self.language_model(
+            inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds,
+            labels=labels,
             use_cache=use_cache,
             cache_position=cache_position,
+            logits_to_keep=logits_to_keep,
             **kwargs,
         )
-
-        hidden_states = outputs[0] if not return_dict else outputs.last_hidden_state
-
-        # Compute logits
-        if self.config.text_config.pretraining_tp > 1:
-            lm_head_slices = self.lm_head.weight.split(
-                self.vocab_size // self.config.text_config.pretraining_tp, dim=0
-            )
-            logits = [
-                nn.functional.linear(hidden_states, lm_head_slices[i])
-                for i in range(self.config.text_config.pretraining_tp)
-            ]
-            logits = torch.cat(logits, dim=-1)
-        else:
-            if logits_to_keep:
-                hidden_states = hidden_states[..., -logits_to_keep:, :]
-            logits = self.lm_head(hidden_states)
-
-        logits = logits.to(torch.float32)
-
-        loss = None
-        if labels is not None:
-            # Shift so that tokens < n predict n
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = labels[..., 1:].contiguous()
-            # Flatten the tokens
-            loss_fct = nn.CrossEntropyLoss(ignore_index=-100)
-            shift_logits = shift_logits.view(-1, self.vocab_size)
-            shift_labels = shift_labels.view(-1)
-            # Enable model parallelism
-            shift_labels = shift_labels.to(shift_logits.device)
-            loss = loss_fct(shift_logits, shift_labels)
-
-        if not return_dict:
-            output = (logits,) + outputs[1:]
-            return (loss,) + output if loss is not None else output
-
-        return CausalLMOutputWithPast(
-            loss=loss,
-            logits=logits,
-            past_key_values=outputs.past_key_values,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-        )
+        return outputs
 
     def prepare_inputs_for_generation(
         self,
@@ -765,10 +648,8 @@ class VibeVoiceASRForConditionalGeneration(VibeVoiceASRPreTrainedModel, Generati
         cache_position=None,
         position_ids=None,
         use_cache=True,
-        speech_tensors=None,
-        speech_masks=None,
-        speech_semantic_tensors=None,
-        acoustic_input_mask=None,
+        input_values=None,
+        padding_mask=None,
         **kwargs,
     ):
         """
@@ -818,34 +699,13 @@ class VibeVoiceASRForConditionalGeneration(VibeVoiceASRPreTrainedModel, Generati
             }
         )
 
-        # Only include speech inputs on the first forward pass
         if cache_position is not None and len(cache_position) > 0 and cache_position[0] == 0:
-            # First forward pass - include speech inputs if provided
-            model_inputs.update(
-                {
-                    "speech_tensors": speech_tensors,
-                    "speech_masks": speech_masks,
-                    "speech_semantic_tensors": speech_semantic_tensors,
-                    "acoustic_input_mask": acoustic_input_mask,
-                }
-            )
-        else:
-            # Subsequent generation steps - exclude speech inputs
-            model_inputs.update(
-                {
-                    "speech_tensors": None,
-                    "speech_masks": None,
-                    "speech_semantic_tensors": None,
-                    "acoustic_input_mask": None,
-                }
-            )
+            if input_values is not None:
+                model_inputs["input_values"] = input_values
+            if padding_mask is not None:
+                model_inputs["padding_mask"] = padding_mask
 
         return model_inputs
 
 
-__all__ = [
-    "VibeVoiceASRForConditionalGeneration",
-    "VibeVoiceASRPreTrainedModel",
-    "VibeVoiceASRModel",
-    "VibeVoiceASRSemanticTokenizerModel",
-]
+__all__ = ["VibeVoiceAsrForConditionalGeneration", "VibeVoiceAsrPreTrainedModel", "VibeVoiceAsrEncoderModel"]
