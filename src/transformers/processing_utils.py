@@ -1740,6 +1740,11 @@ class ProcessorMixin(PushToHubMixin):
         return_dict = processed_kwargs["template_kwargs"].pop("return_dict", True)
         mm_load_kwargs = processed_kwargs["mm_load_kwargs"]
 
+        if hasattr(self, "feature_extractor") and hasattr(self.feature_extractor, "sampling_rate"):
+            sampling_rate = self.feature_extractor.sampling_rate
+        else:
+            sampling_rate = 16_000
+
         if tokenize:
             batch_images, batch_videos = [], []
             batch_audios = []
@@ -1771,10 +1776,10 @@ class ProcessorMixin(PushToHubMixin):
                     # Audio models do not accept nested list of audios (yet!) so we construct a flat input audio list
                     if not mm_load_kwargs["load_audio_from_video"]:
                         for fname in audio_fnames:
-                            batch_audios.append(load_audio(fname, sampling_rate=mm_load_kwargs["sampling_rate"]))
+                            batch_audios.append(load_audio(fname, sampling_rate=sampling_rate))
                     else:
                         for fname in video_fnames:
-                            batch_audios.append(load_audio(fname, sampling_rate=mm_load_kwargs["sampling_rate"]))
+                            batch_audios.append(load_audio(fname, sampling_rate=sampling_rate))
 
                 # Currently all processors can accept nested list of batches, but not flat list of visuals
                 # So we'll make a batched list of images and let the processor handle it
