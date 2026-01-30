@@ -76,7 +76,8 @@ print("Input audio shape:", inputs.input_values.shape)
 # Input audio shape: torch.Size([1, 1, 224000])
 
 with torch.no_grad():
-    encoded_outputs = model.encode(inputs.input_values)
+    # set VAE sampling to False
+    encoded_outputs = model.encode(inputs.input_values, sample=False)
     print("Latent shape:", encoded_outputs.latents.shape)
     # Latent shape: torch.Size([1, 70, 64])
     

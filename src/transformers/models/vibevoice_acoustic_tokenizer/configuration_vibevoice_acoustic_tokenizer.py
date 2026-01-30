@@ -55,7 +55,7 @@ class VibeVoiceAcousticTokenizerConfig(PretrainedConfig):
         ffn_expansion (`int`, *optional*, defaults to 4):
             Expansion factor for feed-forward networks.
         vae_std (`float`, *optional*, defaults to 0.625):
-            Standard deviation used during VAE sampling.
+            Standard deviation used for VAE sampling after encoder.
     Example:
 
     ```python
