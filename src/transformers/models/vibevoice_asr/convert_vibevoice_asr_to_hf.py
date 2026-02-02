@@ -64,9 +64,13 @@ STATE_DICT_MAPPING = {
     r"mixer\.conv\.conv\.conv\.":                                                   r"mixer.conv.",
     r"\.conv\.conv\.conv\.":                                                        r".conv.conv.",
 
-    # Acoustic and semantic connectors
-    r"^model\.acoustic_connector\.":                                                r"acoustic_connector.",
-    r"^model\.semantic_connector\.":                                                r"semantic_connector.",
+    # Merged acoustic and semantic projector
+    r"^model\.acoustic_connector\.fc1\.":                                           r"multi_modal_projector.acoustic_linear_1.",
+    r"^model\.acoustic_connector\.fc2\.":                                           r"multi_modal_projector.acoustic_linear_2.",
+    r"^model\.acoustic_connector\.norm\.":                                          r"multi_modal_projector.acoustic_norm.",
+    r"^model\.semantic_connector\.fc1\.":                                           r"multi_modal_projector.semantic_linear_1.",
+    r"^model\.semantic_connector\.fc2\.":                                           r"multi_modal_projector.semantic_linear_2.",
+    r"^model\.semantic_connector\.norm\.":                                          r"multi_modal_projector.semantic_norm.",
 }
 # fmt: on
 
@@ -74,22 +78,17 @@ STATE_DICT_MAPPING = {
 def map_old_key_to_new(old_key: str) -> str:
     new_key = old_key
 
-    # Apply all regex patterns
     for pattern, replacement in STATE_DICT_MAPPING.items():
-        # Check if pattern matches
         match = re.search(pattern, new_key)
         if match:
             # Handle index shifts for conv_layers (downsample_layers/upsample_layers indexed from 1)
             if "PLACEHOLDER" in replacement and match.groups():
-                # Extract the layer index from the match
                 layer_idx = int(match.group(1))
                 # Shift down by 1 since layer 0 becomes stem
                 new_idx = layer_idx - 1
-                # Replace PLACEHOLDER with the new index
                 replacement = replacement.replace("PLACEHOLDER", str(new_idx))
 
             new_key = re.sub(pattern, replacement, new_key)
-            # Don't break - continue applying patterns for nested fixes
 
     # Additional cleanup for conv layers that might not be caught by patterns
     # Handle cases where stem transformations already applied, but conv.conv needs fixing
@@ -158,8 +157,7 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
         with open(config_path, "r") as f:
             original_config = json.load(f)
 
-        # TODO do this in acoustic tokenizer model
-        # Process acoustic tokenizer config
+        # Prepare acoustic tokenizer config
         acoustic_config_dict = original_config.get("acoustic_tokenizer_config", {}).copy()
         if "encoder_depths" in acoustic_config_dict and isinstance(acoustic_config_dict["encoder_depths"], str):
             acoustic_config_dict["encoder_depths"] = list(map(int, acoustic_config_dict["encoder_depths"].split("-")))
@@ -176,7 +174,7 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
         if "conv_bias" in acoustic_config_dict:
             acoustic_config_dict["bias"] = acoustic_config_dict.pop("conv_bias")
         if "fix_std" in acoustic_config_dict:
-            # passed to main model config
+            # NOTE passed to main model config
             acoustic_vae_std = acoustic_config_dict.pop("fix_std") / 0.8
         for key in [
             "decoder_depths",
@@ -196,7 +194,7 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
 
         acoustic_config = VibeVoiceAsrEncoderConfig(**acoustic_config_dict)
 
-        # Process semantic tokenizer config
+        # Prepare semantic tokenizer config
         semantic_config_dict = original_config.get("semantic_tokenizer_config", {}).copy()
         if "encoder_depths" in semantic_config_dict and isinstance(semantic_config_dict["encoder_depths"], str):
             semantic_config_dict["encoder_depths"] = list(map(int, semantic_config_dict["encoder_depths"].split("-")))
@@ -237,9 +235,6 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
             semantic_tokenizer_config=semantic_config,
             text_config=Qwen2Config(**original_config.get("decoder_config", {})),
             acoustic_vae_std=acoustic_vae_std,
-            # audio_token_id=original_config.get("audio_token_id", 151669),
-            # acoustic_vae_dim=original_config.get("acoustic_vae_dim", 64),
-            # semantic_vae_dim=original_config.get("semantic_vae_dim", 128),
         )
     else:
         logger.warning("No config.json found, using default configuration")
@@ -251,7 +246,7 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
 def create_processor(checkpoint_path: str | Path, output_dir: str | Path) -> VibeVoiceAsrProcessor:
     checkpoint_path = Path(checkpoint_path)
 
-    # Original building of sequence: https://github.com/microsoft/VibeVoice/blob/b2aee8015c3c2d97c388346ebcfffdaf2f427f7d/vibevoice/processor/vibevoice_asr_processor.py#L347
+    # Original building of token sequence: https://github.com/microsoft/VibeVoice/blob/b2aee8015c3c2d97c388346ebcfffdaf2f427f7d/vibevoice/processor/vibevoice_asr_processor.py#L347
     chat_template = """{%- set system_prompt = system_prompt | default("You are a helpful assistant that transcribes audio input into text output in JSON format.") -%}
 <|im_start|>system
 {{ system_prompt }}<|im_end|>
@@ -288,7 +283,7 @@ This is a <|AUDIO_DURATION|> seconds audio, please transcribe it with these keys
     return processor
 
 
-def convert_checkpoint(checkpoint_path, output_dir, push_to_hub, bfloat16):
+def convert_checkpoint(checkpoint_path, output_dir, push_to_hub, bfloat16, max_shard_size):
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -336,16 +331,15 @@ def convert_checkpoint(checkpoint_path, output_dir, push_to_hub, bfloat16):
     model.generation_config.eos_token_id = processor.tokenizer.eos_token_id
     model.generation_config.bos_token_id = processor.tokenizer.bos_token_id
     model.generation_config.do_sample = False
-    # TODO check correct max new tokens? https://github.com/microsoft/VibeVoice/blob/b2aee8015c3c2d97c388346ebcfffdaf2f427f7d/demo/vibevoice_asr_inference_from_file.py#L452
     model.generation_config.max_new_tokens = 32768
     model.generation_config.max_length = 32768
 
     logger.info(f"Saving model to {output_path}")
-    model.save_pretrained(str(output_path))
+    model.save_pretrained(str(output_path), max_shard_size=max_shard_size)
 
     if push_to_hub:
         logger.info(f"Pushing to Hub: {push_to_hub}")
-        model.push_to_hub(push_to_hub)
+        model.push_to_hub(push_to_hub, max_shard_size=max_shard_size)
         processor.push_to_hub(push_to_hub)
 
     logger.info("Verifying conversion by reloading model")
@@ -400,6 +394,12 @@ def main():
     parser.add_argument(
         "--float32", action="store_true", help="Whether to use float32 precision. Default is bfloat16."
     )
+    parser.add_argument(
+        "--max_shard_size",
+        type=str,
+        default="2.5GB",
+        help="Maximum shard size for safetensors files in GB.",
+    )
 
     args = parser.parse_args()
 
@@ -408,6 +408,7 @@ def main():
         output_dir=args.output_dir,
         push_to_hub=args.push_to_hub,
         bfloat16=not args.float32,
+        max_shard_size=args.max_shard_size,
     )
 
 

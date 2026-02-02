@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import re
 
 import numpy as np
@@ -20,6 +21,14 @@ from ...audio_utils import AudioInput, make_list_of_audio
 from ...feature_extraction_utils import BatchFeature
 from ...processing_utils import ProcessingKwargs, ProcessorMixin, Unpack
 from ...tokenization_utils_base import TextInput
+from ...utils import is_torch_available, logging
+
+
+if is_torch_available():
+    import torch
+
+
+logger = logging.get_logger(__name__)
 
 
 class VibeVoiceAsrProcessorKwargs(ProcessingKwargs, total=False):
@@ -68,7 +77,6 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
     ):
         super().__init__(feature_extractor, tokenizer, chat_template=chat_template)
 
-        # NOTE (ebezzam) original: https://github.com/microsoft/VibeVoice/blob/b2aee8015c3c2d97c388346ebcfffdaf2f427f7d/vibevoice/processor/vibevoice_asr_processor.py#L71
         if not hasattr(tokenizer, "audio_bos_token"):
             self.audio_bos_token = "<|object_ref_start|>"
             self.audio_bos_token_id = tokenizer.convert_tokens_to_ids(self.audio_bos_token)
@@ -95,14 +103,6 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
         else:
             self.audio_duration_token = tokenizer.audio_duration_token
 
-        # # TODO (ebezzam) not sure about this
-        # if not hasattr(tokenizer, "pad_token"):
-        #     self.pad_token = "<|endoftext|>"
-        #     self.pad_token_id = tokenizer.convert_tokens_to_ids(self.pad_token)
-        # else:
-        #     self.pad_token = tokenizer.pad_token
-        #     self.pad_token_id = tokenizer.pad_token_id
-
     def __call__(
         self,
         text: TextInput | list[TextInput],
@@ -128,13 +128,8 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
                 Additional keyword arguments passed to the tokenizer and feature extractor.
 
         Returns:
-            [`BatchFeature`]: A [`BatchFeature`] with the following fields:
-            - **input_ids** -- List of token ids to be fed to the model.
-            - **attention_mask** -- List of indices specifying which tokens should be attended to by the model (when
-              `return_attention_mask=True`).
-            - **speech_tensors** -- List of audio values to be fed to the model. Returned when `audio` is not `None`.
-            - **acoustic_input_mask** -- Mask indicating which positions in input_ids correspond to audio tokens.
-            - **labels** -- Labels for training language model. Returned when `output_labels=True`.
+            [`BatchFeature`]: A dictionary with tokenized text (`input_ids`, `attention_mask`) and
+            audio features (`input_features`, `input_features_mask`).
         """
         output_kwargs = self._merge_kwargs(
             VibeVoiceAsrProcessorKwargs,
@@ -184,6 +179,142 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
             data["labels"] = labels
 
         return BatchFeature(data=data, tensor_type=return_tensors)
+
+    def apply_transcription_request(
+        self,
+        audio: str | list[str] | AudioInput,
+        prompt: str | list[str] | None = None,
+        **kwargs: Unpack[VibeVoiceAsrProcessorKwargs],
+    ) -> BatchFeature:
+        """
+        Prepare inputs for automatic speech recognition without manually writing the chat template.
+
+        Args:
+            audio (`str`, `list[str]`, `np.ndarray`, `torch.Tensor`, `list[np.ndarray]`, `list[torch.Tensor]`):
+                Audio to transcribe. Strings are interpreted as local paths or URLs and will be loaded automatically by
+                the chat template loader; NumPy arrays and PyTorch tensors are forwarded directly.
+            prompt (`str` or `list[str]`, *optional*):
+                Custom prompt(s) to include in the user turn as extra context. A list must be the same length as the
+                batch. When `None`, no additional context is provided.
+            **kwargs:
+                Additional keyword arguments forwarded to [`~VibeVoiceAsrProcessor.apply_chat_template`] (for example
+                `text_kwargs`, `audio_kwargs`, ...).
+
+        Returns:
+            [`BatchFeature`]: Processor outputs ready to be passed to [`VibeVoiceAsrForConditionalGeneration.generate`].
+        """
+
+        if isinstance(audio, str):
+            audio_items: list[str | np.ndarray] = [audio]
+        elif isinstance(audio, (list, tuple)) and audio and all(isinstance(el, str) for el in audio):
+            audio_items = list(audio)
+        else:
+            audio_items = list(make_list_of_audio(audio))
+            if is_torch_available():
+                audio_items = [el.detach().cpu().numpy() if isinstance(el, torch.Tensor) else el for el in audio_items]
+
+        batch_size = len(audio_items)
+        if batch_size == 0:
+            raise ValueError("`audio` must contain at least one sample.")
+
+        if prompt is None:
+            prompts = [None] * batch_size
+        elif isinstance(prompt, str):
+            prompts = [prompt] * batch_size
+        elif isinstance(prompt, (list, tuple)):
+            if len(prompt) != batch_size:
+                raise ValueError(
+                    f"Received {len(prompt)} prompt(s) for {batch_size} audio sample(s); counts must match."
+                )
+            prompts = list(prompt)
+        else:
+            raise TypeError("`prompt` must be a string, a sequence of strings, or `None`.")
+
+        conversations = []
+        for prompt_text, audio_item in zip(prompts, audio_items):
+            content = []
+            if isinstance(audio_item, str):
+                content.append({"type": "audio", "path": audio_item})
+            else:
+                content.append({"type": "audio", "audio": audio_item})
+
+            if prompt_text is not None:
+                content.append({"type": "text", "text": prompt_text})
+
+            conversations.append([{"role": "user", "content": content}])
+
+        return self.apply_chat_template(
+            conversations,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=True,
+            **kwargs,
+        )
+
+    def batch_decode(
+        self, *args, return_as_dicts=False, extract_transcription=False, skip_special_tokens=True, **kwargs
+    ):
+        """
+        Forward arguments to [`~PreTrainedTokenizer.batch_decode`] and optionally parse the dict-like output.
+
+        VibeVoice ASR outputs transcriptions in a dictionary-like format, e.g.:
+        ```
+        [
+            'assistant\n[{"Start":0.0,"End":7.56,"Speaker":0,"Content":"text"}]\n',
+            'assistant\n[{"Start":0,"End":5.20,"Speaker":0,"Content":"text"}]\n'
+        ]
+        ```
+
+        Args:
+            return_as_dicts (`bool`, *optional*, defaults to `False`):
+                Whether to reformat the each decoded output as a list of dicts for each speaker.
+            extract_transcription (`bool`, *optional*, defaults to `False`):
+                Whether to extract only the transcription content from each decoded output, dropping the speaker tags
+                and timestamps.
+
+        Returns:
+            `list`: If `return_as_dicts=True`, returns list of parsed dictionary objects.
+                If `extract_transcription=True`, returns list of extracted transcription strings.
+        """
+        decoded = self.tokenizer.batch_decode(*args, skip_special_tokens=skip_special_tokens, **kwargs)
+
+        if return_as_dicts or extract_transcription:
+            decoded = [self._parse_dict_output(text) for text in decoded]
+
+        if extract_transcription:
+            return [self._extract_content_from_dict(dict_output) for dict_output in decoded]
+        else:
+            return decoded
+
+    def _parse_dict_output(self, text: str) -> list[dict] | str:
+        """Parse JSON output with validation, returning original text on failure."""
+        text = text.strip()
+        if text.startswith("assistant"):
+            text = text[len("assistant") :].strip()
+
+        if not text.startswith("["):
+            logger.warning("Output doesn't start with '[', likely not JSON array.")
+            return text
+
+        segments = json.loads(text)
+        if not isinstance(segments, list):
+            logger.warning(f"Expected list, got {type(segments).__name__}.")
+            return text
+
+        if segments and not all(isinstance(seg, dict) and "Content" in seg for seg in segments):
+            logger.warning("Not all segments have expected structure.")
+            return text
+
+        return segments
+
+    def _extract_content_from_dict(self, dict_output: list[dict] | str) -> str:
+        """Extract and concatenate 'Content' fields, handling both parsed and unparsed output."""
+        # If parsing failed, dict_output is the original string
+        if isinstance(dict_output, str):
+            return dict_output
+
+        contents = [seg.get("Content", "") for seg in dict_output if isinstance(seg, dict)]
+        return " ".join(contents).strip()
 
 
 __all__ = ["VibeVoiceAsrProcessor"]
