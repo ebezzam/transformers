@@ -90,12 +90,6 @@ def map_old_key_to_new(old_key: str) -> str:
 
             new_key = re.sub(pattern, replacement, new_key)
 
-    # Additional cleanup for conv layers that might not be caught by patterns
-    # Handle cases where stem transformations already applied, but conv.conv needs fixing
-    if "stem.conv.conv" not in new_key and "conv_layers." not in new_key:
-        # Fix remaining .conv.conv. patterns (but not stem.conv.conv or conv_layers.*.conv.conv)
-        new_key = re.sub(r"\.conv\.conv\.", r".conv.", new_key)
-
     return new_key
 
 
@@ -105,8 +99,6 @@ def convert_state_dict(original_state_dict: dict[str, Any]) -> dict[str, Any]:
     for old_key, tensor in original_state_dict.items():
         new_key = map_old_key_to_new(old_key)
         new_state_dict[new_key] = tensor
-
-        # Log conversions for debugging (optional)
         if old_key != new_key:
             logger.debug(f"Converted: {old_key} -> {new_key}")
 
@@ -166,13 +158,11 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
         if "encoder_ratios" in acoustic_config_dict:
             acoustic_config_dict["downsampling_ratios"] = list(reversed(acoustic_config_dict.pop("encoder_ratios")))
         if "encoder_n_filters" in acoustic_config_dict:
-            acoustic_config_dict["n_filters"] = acoustic_config_dict.pop("encoder_n_filters")
+            acoustic_config_dict["num_filters"] = acoustic_config_dict.pop("encoder_n_filters")
         if "encoder_depths" in acoustic_config_dict:
             acoustic_config_dict["depths"] = acoustic_config_dict.pop("encoder_depths")
         if "vae_dim" in acoustic_config_dict:
             acoustic_config_dict["hidden_size"] = acoustic_config_dict.pop("vae_dim")
-        if "conv_bias" in acoustic_config_dict:
-            acoustic_config_dict["bias"] = acoustic_config_dict.pop("conv_bias")
         if "fix_std" in acoustic_config_dict:
             # NOTE passed to main model config
             acoustic_vae_std = acoustic_config_dict.pop("fix_std") / 0.8
@@ -182,6 +172,7 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
             "decoder_ratios",
             "std_dist_type",
             "pad_mode",
+            "conv_bias",
             "causal",
             "mixer_layer",
             "layernorm",
@@ -203,13 +194,11 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
         if "encoder_ratios" in semantic_config_dict:
             semantic_config_dict["downsampling_ratios"] = list(reversed(semantic_config_dict.pop("encoder_ratios")))
         if "encoder_n_filters" in semantic_config_dict:
-            semantic_config_dict["n_filters"] = semantic_config_dict.pop("encoder_n_filters")
+            semantic_config_dict["num_filters"] = semantic_config_dict.pop("encoder_n_filters")
         if "encoder_depths" in semantic_config_dict:
             semantic_config_dict["depths"] = semantic_config_dict.pop("encoder_depths")
         if "vae_dim" in semantic_config_dict:
             semantic_config_dict["hidden_size"] = semantic_config_dict.pop("vae_dim")
-        if "conv_bias" in semantic_config_dict:
-            semantic_config_dict["bias"] = semantic_config_dict.pop("conv_bias")
         for key in [
             "decoder_depths",
             "decoder_n_filters",
@@ -217,6 +206,7 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
             "std_dist_type",
             "fix_std",
             "pad_mode",
+            "conv_bias",
             "causal",
             "mixer_layer",
             "layernorm",
@@ -321,7 +311,6 @@ def convert_checkpoint(checkpoint_path, output_dir, push_to_hub, bfloat16, max_s
 
     logger.info("Loading weights into model")
     load_result = model.load_state_dict(converted_state_dict, strict=False)
-
     if load_result.missing_keys:
         raise ValueError(f"{len(load_result.missing_keys)} missing keys: {load_result.missing_keys}")
     if load_result.unexpected_keys:

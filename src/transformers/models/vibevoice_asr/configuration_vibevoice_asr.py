@@ -19,8 +19,6 @@
 # limitations under the License.
 
 
-import numpy as np
-
 from ...configuration_utils import PretrainedConfig
 from ..auto import CONFIG_MAPPING, AutoConfig
 
@@ -38,13 +36,11 @@ class VibeVoiceAsrEncoderConfig(PretrainedConfig):
             Kernel size for convolutional layers.
         rms_norm_eps (`float`, *optional*, defaults to 1e-05):
             Epsilon value for RMSNorm layers.
-        bias (`bool`, *optional*, defaults to `True`):
-            Whether to use bias in convolution and feed-forward layers.
         layer_scale_init_value (`float`, *optional*, defaults to 1e-06):
             Initial value for layer scaling.
         initializer_range (`float`, *optional*, defaults to 0.01):
             Standard deviation for weight initialization.
-        n_filters (`int`, *optional*, defaults to 32):
+        num_filters (`int`, *optional*, defaults to 32):
             Number of filters in initial convolutional layer, and doubles after each downsampling.
         downsampling_ratios (`List[int]`, *optional*, defaults to `[2, 2, 4, 5, 5, 8]`):
             Downsampling ratios for each layer.
@@ -77,10 +73,9 @@ class VibeVoiceAsrEncoderConfig(PretrainedConfig):
         hidden_size=64,
         kernel_size=7,
         rms_norm_eps=1e-5,
-        bias=True,
         layer_scale_init_value=1e-6,
         initializer_range=1e-2,
-        n_filters=32,
+        num_filters=32,
         downsampling_ratios=[2, 2, 4, 5, 5, 8],
         depths=[3, 3, 3, 3, 3, 3, 8],
         hidden_act="gelu",
@@ -93,17 +88,12 @@ class VibeVoiceAsrEncoderConfig(PretrainedConfig):
         self.hidden_act = hidden_act
         self.kernel_size = kernel_size
         self.rms_norm_eps = rms_norm_eps
-        self.bias = bias
         self.layer_scale_init_value = layer_scale_init_value
         self.ffn_expansion = ffn_expansion
         self.initializer_range = initializer_range
-        self.n_filters = n_filters
+        self.num_filters = num_filters
         self.downsampling_ratios = downsampling_ratios
         self.depths = depths
-
-    @property
-    def hop_length(self) -> int:
-        return np.prod(self.downsampling_ratios)
 
 
 class VibeVoiceAsrConfig(PretrainedConfig):

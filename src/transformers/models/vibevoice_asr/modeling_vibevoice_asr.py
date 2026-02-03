@@ -18,9 +18,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 from dataclasses import dataclass
 from typing import Optional
 
+import numpy as np
 import torch
 from torch import nn
 
@@ -28,9 +30,9 @@ from ... import initialization as init
 from ...activations import ACT2FN
 from ...generation import GenerationMixin
 from ...integrations import use_kernel_forward_from_hub
-from ...modeling_outputs import CausalLMOutputWithPast, ModelOutput
+from ...modeling_outputs import CausalLMOutputWithPast
 from ...modeling_utils import PreTrainedModel
-from ...utils import auto_docstring, can_return_tuple
+from ...utils import ModelOutput, auto_docstring, can_return_tuple
 from ..auto import AutoModel, AutoModelForCausalLM
 from .configuration_vibevoice_asr import VibeVoiceAsrConfig, VibeVoiceAsrEncoderConfig
 
@@ -182,9 +184,9 @@ class VibeVoiceAsrMultiModalProjector(nn.Module):
 class VibeVoiceAsrFeedForward(nn.Module):
     def __init__(self, config, hidden_size):
         super().__init__()
-        self.linear1 = nn.Linear(hidden_size, config.ffn_expansion * hidden_size, bias=config.bias)
+        self.linear1 = nn.Linear(hidden_size, config.ffn_expansion * hidden_size)
         self.activation = ACT2FN[config.hidden_act]
-        self.linear2 = nn.Linear(config.ffn_expansion * hidden_size, hidden_size, bias=config.bias)
+        self.linear2 = nn.Linear(config.ffn_expansion * hidden_size, hidden_size)
 
     def forward(self, hidden_states):
         return self.linear2(self.activation(self.linear1(hidden_states)))
@@ -201,13 +203,10 @@ class VibeVoiceAsrCausalConv1d(nn.Module):
         stride: int = 1,
         dilation: int = 1,
         groups: int = 1,
-        bias: bool = True,
         layer_idx: int | None = None,
     ):
         super().__init__()
-        self.conv = nn.Conv1d(
-            in_channels, out_channels, kernel_size, stride, dilation=dilation, groups=groups, bias=bias
-        )
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, stride, dilation=dilation, groups=groups)
         self.causal_padding = (kernel_size - 1) * dilation - (stride - 1)
         if self.causal_padding < 0:
             raise ValueError(
@@ -252,7 +251,6 @@ class VibeVoiceAsrConvNext1dLayer(nn.Module):
             out_channels=hidden_size,
             kernel_size=config.kernel_size,
             groups=hidden_size,
-            bias=config.bias,
             dilation=dilation,
             stride=stride,
             layer_idx=layer_idx,
@@ -296,16 +294,16 @@ class VibeVoiceAsrPreTrainedModel(PreTrainedModel):
 
 @dataclass
 @auto_docstring
-class VibeVoiceAsrEncoderOutput(ModelOutput):
-    """
+class VibeVoiceAsrModelOutput(ModelOutput):
+    r"""
     latents (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
-        Projected latents (continuous representations for semantic tokens) at the output of the encoder.
+        Projected latents (continuous representations for acoustic tokens) at the output of the encoder.
     padding_cache (`VibeVoiceAsrConv1dPaddingCache`, *optional*, returned when `use_cache=True` is passed):
-        A [`VibeVoiceAsrConv1dPaddingCache`] instance containing cached convolution states for each layer that
-        can be reused for streaming mode.
+        A [`VibeVoiceAsrConv1dPaddingCache`] instance containing cached convolution states for each encoder
+        layer that can be passed to subsequent forward calls.
     """
 
-    latents: torch.FloatTensor = None
+    latents: torch.FloatTensor | None = None
     padding_cache: Optional["VibeVoiceAsrConv1dPaddingCache"] = None
 
 
@@ -315,16 +313,15 @@ class VibeVoiceAsrEncoderStem(nn.Module):
 
         self.conv = VibeVoiceAsrCausalConv1d(
             in_channels=config.channels,
-            out_channels=config.n_filters,
+            out_channels=config.num_filters,
             kernel_size=config.kernel_size,
-            bias=config.bias,
             layer_idx=0,
         )
         self.stage = nn.ModuleList(
             [
                 VibeVoiceAsrConvNext1dLayer(
                     config,
-                    hidden_size=config.n_filters,
+                    hidden_size=config.num_filters,
                     layer_idx=layer_idx,
                 )
                 for layer_idx in range(1, config.depths[0] + 1)
@@ -344,14 +341,13 @@ class VibeVoiceAsrEncoderLayer(nn.Module):
 
         depth_idx = stage_idx + 1  # first depth is for stem layer
         layer_idx = sum(depth + 1 for depth in config.depths[:depth_idx])
-        intermediate_channels = int(config.n_filters * (2 ** (depth_idx)))
+        intermediate_channels = int(config.num_filters * (2 ** (depth_idx)))
 
         self.conv = VibeVoiceAsrCausalConv1d(
-            in_channels=int(config.n_filters * (2**stage_idx)),
+            in_channels=int(config.num_filters * (2**stage_idx)),
             out_channels=intermediate_channels,
             kernel_size=int(config.downsampling_ratios[stage_idx] * 2),
             stride=config.downsampling_ratios[stage_idx],
-            bias=config.bias,
             layer_idx=layer_idx,
         )
         self.stage = nn.ModuleList(
@@ -377,10 +373,9 @@ class VibeVoiceAsrEncoder(nn.Module):
             [VibeVoiceAsrEncoderLayer(config, stage_idx) for stage_idx in range(len(config.downsampling_ratios))]
         )
         self.head = VibeVoiceAsrCausalConv1d(
-            in_channels=int(config.n_filters * (2 ** len(config.downsampling_ratios))),
+            in_channels=int(config.num_filters * (2 ** len(config.downsampling_ratios))),
             out_channels=config.hidden_size,
             kernel_size=config.kernel_size,
-            bias=config.bias,
             layer_idx=sum(depth + 1 for depth in config.depths),
         )
 
@@ -442,7 +437,7 @@ class VibeVoiceAsrEncoderModel(VibeVoiceAsrPreTrainedModel):
             )
         latents = self.encoder(audio, padding_cache=padding_cache)
 
-        return VibeVoiceAsrEncoderOutput(
+        return VibeVoiceAsrModelOutput(
             latents=latents,
             padding_cache=padding_cache if use_cache else None,
         )
@@ -494,7 +489,7 @@ class VibeVoiceAsrForConditionalGeneration(VibeVoiceAsrPreTrainedModel, Generati
         input_values: torch.FloatTensor,
         padding_mask: torch.BoolTensor | None = None,
         tokenizer_chunk_size: int | None = None,
-    ) -> tuple | VibeVoiceAsrEncoderOutput:
+    ) -> tuple | VibeVoiceAsrModelOutput:
         r"""
         input_values (`torch.FloatTensor` of shape `(batch_size, num_samples)`):
             Input audio tensor. Audio should be sampled at 24kHz.
@@ -543,13 +538,12 @@ class VibeVoiceAsrForConditionalGeneration(VibeVoiceAsrPreTrainedModel, Generati
         combined_features = self.multi_modal_projector(acoustic_latents, semantic_latents)
         if padding_mask is not None:
             # Adjust padding mask according to tokenizer compression
-            num_audio_tokens = torch.ceil(padding_mask.sum(dim=-1) / self.acoustic_tokenizer.config.hop_length).to(
-                torch.int64
-            )
+            hop_length = np.prod(self.acoustic_tokenizer.config.downsampling_ratios)
+            num_audio_tokens = torch.ceil(padding_mask.sum(dim=-1) / hop_length).to(torch.int64)
             padding_mask = torch.arange(max(num_audio_tokens)) < num_audio_tokens[:, None].cpu()
             combined_features = combined_features[padding_mask]
 
-        return VibeVoiceAsrEncoderOutput(latents=combined_features)
+        return VibeVoiceAsrModelOutput(latents=combined_features)
 
     @can_return_tuple
     @auto_docstring

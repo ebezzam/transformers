@@ -12,14 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass
-from typing import Optional
 
+import numpy as np
 import torch
 from torch import nn
 
 from ...configuration_utils import PretrainedConfig
-from ...modeling_outputs import CausalLMOutputWithPast, ModelOutput
+from ...modeling_outputs import CausalLMOutputWithPast
 from ...utils import auto_docstring, can_return_tuple
 from ..audioflamingo3.modeling_audioflamingo3 import AudioFlamingo3ForConditionalGeneration
 from ..auto import CONFIG_MAPPING, AutoConfig, AutoModel
@@ -27,6 +26,7 @@ from ..mimi.modeling_mimi import MimiConv1dPaddingCache
 from ..qwen2.modeling_qwen2 import Qwen2RMSNorm
 from ..vibevoice_acoustic_tokenizer.configuration_vibevoice_acoustic_tokenizer import VibeVoiceAcousticTokenizerConfig
 from ..vibevoice_acoustic_tokenizer.modeling_vibevoice_acoustic_tokenizer import (
+    VibeVoiceAcousticTokenizerEncoderOutput,
     VibeVoiceAcousticTokenizerModel,
     VibeVoiceAcousticTokenizerPreTrainedModel,
 )
@@ -45,13 +45,11 @@ class VibeVoiceAsrEncoderConfig(VibeVoiceAcousticTokenizerConfig):
             Kernel size for convolutional layers.
         rms_norm_eps (`float`, *optional*, defaults to 1e-05):
             Epsilon value for RMSNorm layers.
-        bias (`bool`, *optional*, defaults to `True`):
-            Whether to use bias in convolution and feed-forward layers.
         layer_scale_init_value (`float`, *optional*, defaults to 1e-06):
             Initial value for layer scaling.
         initializer_range (`float`, *optional*, defaults to 0.01):
             Standard deviation for weight initialization.
-        n_filters (`int`, *optional*, defaults to 32):
+        num_filters (`int`, *optional*, defaults to 32):
             Number of filters in initial convolutional layer, and doubles after each downsampling.
         downsampling_ratios (`List[int]`, *optional*, defaults to `[2, 2, 4, 5, 5, 8]`):
             Downsampling ratios for each layer.
@@ -84,10 +82,9 @@ class VibeVoiceAsrEncoderConfig(VibeVoiceAcousticTokenizerConfig):
         hidden_size=64,
         kernel_size=7,
         rms_norm_eps=1e-5,
-        bias=True,
         layer_scale_init_value=1e-6,
         initializer_range=1e-2,
-        n_filters=32,
+        num_filters=32,
         downsampling_ratios=[2, 2, 4, 5, 5, 8],
         depths=[3, 3, 3, 3, 3, 3, 8],
         hidden_act="gelu",
@@ -99,10 +96,9 @@ class VibeVoiceAsrEncoderConfig(VibeVoiceAcousticTokenizerConfig):
             hidden_size=hidden_size,
             kernel_size=kernel_size,
             rms_norm_eps=rms_norm_eps,
-            bias=bias,
             layer_scale_init_value=layer_scale_init_value,
             initializer_range=initializer_range,
-            n_filters=n_filters,
+            num_filters=num_filters,
             downsampling_ratios=downsampling_ratios,
             depths=depths,
             hidden_act=hidden_act,
@@ -280,19 +276,8 @@ class VibeVoiceAsrPreTrainedModel(VibeVoiceAcousticTokenizerPreTrainedModel):
     _supports_attention_backend = True
 
 
-@dataclass
-@auto_docstring
-class VibeVoiceAsrEncoderOutput(ModelOutput):
-    """
-    latents (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
-        Projected latents (continuous representations for semantic tokens) at the output of the encoder.
-    padding_cache (`VibeVoiceAsrConv1dPaddingCache`, *optional*, returned when `use_cache=True` is passed):
-        A [`VibeVoiceAsrConv1dPaddingCache`] instance containing cached convolution states for each layer that
-        can be reused for streaming mode.
-    """
-
-    latents: torch.FloatTensor = None
-    padding_cache: Optional["VibeVoiceAsrConv1dPaddingCache"] = None
+class VibeVoiceAsrModelOutput(VibeVoiceAcousticTokenizerEncoderOutput):
+    pass
 
 
 @auto_docstring(
@@ -331,7 +316,7 @@ class VibeVoiceAsrEncoderModel(VibeVoiceAcousticTokenizerModel):
             )
         latents = self.encoder(audio, padding_cache=padding_cache)
 
-        return VibeVoiceAsrEncoderOutput(
+        return VibeVoiceAsrModelOutput(
             latents=latents,
             padding_cache=padding_cache if use_cache else None,
         )
@@ -357,7 +342,7 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
         input_values: torch.FloatTensor,
         padding_mask: torch.BoolTensor | None = None,
         tokenizer_chunk_size: int | None = None,
-    ) -> tuple | VibeVoiceAsrEncoderOutput:
+    ) -> tuple | VibeVoiceAsrModelOutput:
         r"""
         input_values (`torch.FloatTensor` of shape `(batch_size, num_samples)`):
             Input audio tensor. Audio should be sampled at 24kHz.
@@ -406,13 +391,12 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
         combined_features = self.multi_modal_projector(acoustic_latents, semantic_latents)
         if padding_mask is not None:
             # Adjust padding mask according to tokenizer compression
-            num_audio_tokens = torch.ceil(padding_mask.sum(dim=-1) / self.acoustic_tokenizer.config.hop_length).to(
-                torch.int64
-            )
+            hop_length = np.prod(self.acoustic_tokenizer.config.downsampling_ratios)
+            num_audio_tokens = torch.ceil(padding_mask.sum(dim=-1) / hop_length).to(torch.int64)
             padding_mask = torch.arange(max(num_audio_tokens)) < num_audio_tokens[:, None].cpu()
             combined_features = combined_features[padding_mask]
 
-        return VibeVoiceAsrEncoderOutput(latents=combined_features)
+        return VibeVoiceAsrModelOutput(latents=combined_features)
 
     @can_return_tuple
     @auto_docstring
