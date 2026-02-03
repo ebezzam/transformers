@@ -168,10 +168,6 @@ class VibeVoiceAcousticTokenizerModelTest(ModelTesterMixin, unittest.TestCase):
     def test_hidden_states_output(self):
         pass
 
-    # @unittest.skip(reason="From CI 'UnboundLocalError: local variable output referenced before assignment'")
-    # def test_model_parallelism(self):
-    #     pass
-
     def test_determinism(self):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
 
