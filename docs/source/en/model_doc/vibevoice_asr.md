@@ -24,30 +24,31 @@ rendered properly in your Markdown viewer.
 
 ## Overview
 
-VibeVoice ASR is an automatic speech recognition model from Microsoft that combines acoustic and semantic audio tokenizers with a causal language model for robust speech-to-text transcription. The model uses VibeVoice's proprietary acoustic tokenizers that process audio at 24kHz, paired with a Qwen2-based language decoder for generating transcriptions.
+VibeVoice ASR is an automatic speech recognition model from Microsoft that combines acoustic and semantic audio tokenizers with a causal language model for robust speech-to-text transcription. The model uses VibeVoice's proprietary acoustic tokenizers that process audio at 24kHz, paired with a Qwen2-based language decoder for generating transcriptions. See the [technical report](https://huggingface.co/papers/2601.18184) for more details.
 
 The model checkpoint is available at: [microsoft/VibeVoice-ASR](https://huggingface.co/microsoft/VibeVoice-ASR)
 
 Highlights:
 
-- **Dual tokenizer architecture**: Combines acoustic and semantic features for improved transcription quality.
-- **24kHz audio processing**: Handles higher quality audio inputs compared to typical 16kHz models.
-- **Streaming support for long audio**: Processes very long audio files (>10 minutes) using automatic segmentation.
-- **Replace-in-place audio fusion**: Audio tokens are replaced with audio embeddings without changing sequence length.
+- **🕒 60-minute Single-Pass Processing**:
+  Unlike conventional ASR models that slice audio into short chunks (often losing global context), VibeVoice ASR accepts up to **60 minutes** of continuous audio input within 64K token length. This ensures consistent speaker tracking and semantic coherence across the entire hour.
+
+- **👤 Customized Hotwords**:
+  Users can provide customized hotwords (e.g., specific names, technical terms, or background info) to guide the recognition process, significantly improving accuracy on domain-specific content.
+
+- **📝 Rich Transcription (Who, When, What)**:
+  The model jointly performs ASR, diarization, and timestamping, producing a structured output that indicates *who* said *what* and *when*.
+  
+- **🌍 Multilingual & Code-Switching Support**:
+  It supports over 50 languages, requires no explicit language setting, and natively handles code-switching within and across utterances. Language distribution can be found [here](#language-distribution).
+
 
 This model was contributed by [Eric Bezzam](https://huggingface.co/bezzam).
 
-### Paper
-
-[VibeVoice](https://arxiv.org/abs/2501.09891): A Unified Generative Streaming Audio Codec and LLM
-Microsoft Research
-Project: https://github.com/microsoft/VibeVoice
 
 ## Usage
 
-### Basic Transcription
-
-The model supports automatic speech recognition with simple text + audio instructions.
+The model supports various automatic speech recognition funcationalities.
 
 ➡️ audio + text instruction
 
