@@ -133,9 +133,8 @@ class VibeVoiceAcousticTokenizerFeatureExtractor(SequenceFeatureExtractor):
             if return_attention_mask:
                 output_values["padding_mask"] = output_values.pop("attention_mask")
 
-        # add channel dimension if missing
-        if output_values["input_values"].ndim == 2:
-            output_values["input_values"] = output_values["input_values"][:, None, :]
+        # add channel dimension
+        output_values["input_values"] = output_values["input_values"][:, None, :]
 
         return output_values
 
