@@ -32,9 +32,12 @@ from ...generation import GenerationMixin
 from ...integrations import use_kernel_forward_from_hub
 from ...modeling_outputs import CausalLMOutputWithPast
 from ...modeling_utils import PreTrainedModel
-from ...utils import ModelOutput, auto_docstring, can_return_tuple
+from ...utils import ModelOutput, auto_docstring, can_return_tuple, logging
 from ..auto import AutoModel, AutoModelForCausalLM
 from .configuration_vibevoice_asr import VibeVoiceAsrConfig, VibeVoiceAsrEncoderConfig
+
+
+logger = logging.get_logger(__name__)
 
 
 @use_kernel_forward_from_hub("RMSNorm")
@@ -277,7 +280,7 @@ class VibeVoiceAsrPreTrainedModel(PreTrainedModel):
     config: VibeVoiceAsrConfig
     base_model_prefix = "model"
     main_input_name = "input_ids"
-    _no_split_modules = ["VibeVoiceAsrEncoderLayer"]
+    _no_split_modules = None
     input_modalities = ("audio", "text")
     supports_gradient_checkpointing = True
     _skip_keys_device_placement = "past_key_values"
@@ -419,9 +422,9 @@ class VibeVoiceAsrEncoderModel(VibeVoiceAsrPreTrainedModel):
 
     @can_return_tuple
     @auto_docstring
-    def forward(self, audio, padding_cache=None, use_cache=None, **kwargs):
+    def forward(self, input_values, padding_cache=None, use_cache=None, **kwargs):
         r"""
-        audio (`torch.FloatTensor` of shape `(batch_size, channels, sequence_length)`):
+        input_values (`torch.FloatTensor` of shape `(batch_size, channels, sequence_length)`):
             Input audio waveform to be encoded into latent representations.
         padding_cache (`VibeVoiceAsrConv1dPaddingCache`, *optional*):
             Cache object for streaming mode to maintain convolution states across layers.
@@ -435,7 +438,7 @@ class VibeVoiceAsrEncoderModel(VibeVoiceAsrPreTrainedModel):
                 per_layer_padding_mode=self.encoder.per_conv_layer_padding_mode,
                 per_layer_in_channels=self.encoder.per_conv_layer_in_channels,
             )
-        latents = self.encoder(audio, padding_cache=padding_cache)
+        latents = self.encoder(input_values, padding_cache=padding_cache)
 
         return VibeVoiceAsrEncoderOutput(
             latents=latents,
@@ -502,6 +505,13 @@ class VibeVoiceAsrForConditionalGeneration(VibeVoiceAsrPreTrainedModel, Generati
 
         if tokenizer_chunk_size is None:
             tokenizer_chunk_size = self.config.tokenizer_chunk_size
+        else:
+            hop_length = np.prod(self.acoustic_tokenizer.config.downsampling_ratios)
+            if tokenizer_chunk_size % hop_length != 0:
+                tokenizer_chunk_size = int((tokenizer_chunk_size // hop_length) * hop_length)
+                logger.warning(
+                    f"`tokenizer_chunk_size` has been adjusted to {tokenizer_chunk_size} to be a multiple of hop length ({hop_length})."
+                )
 
         with torch.no_grad():
             acoustic_encoder_cache = None

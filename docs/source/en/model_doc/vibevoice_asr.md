@@ -48,89 +48,209 @@ This model was contributed by [Eric Bezzam](https://huggingface.co/bezzam).
 
 ## Usage
 
-The model supports various automatic speech recognition funcationalities.
+The model supports various automatic speech recognition functionalities.
 
-➡️ audio + text instruction
+
+### Speaker-timestamped transcription
+
+A notable feature of VibeVoice ASR is its ability to transcribe multi-speaker content, denoting who spoke and when.
 
 ```python
-from transformers import VibeVoiceASRForConditionalGeneration, AutoProcessor
-import torch
+from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
 
-model_id = "microsoft/VibeVoice-ASR"
+
+model_id = "bezzam/VibeVoice-ASR-7B"
+
+# Load processor and model
 processor = AutoProcessor.from_pretrained(model_id)
-model = VibeVoiceASRForConditionalGeneration.from_pretrained(model_id, device_map="auto")
+model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
+print(f"Model loaded on {model.device} with dtype {model.dtype}")
 
-# Load audio (24kHz recommended)
-# audio = load_your_audio_here()  # torch.Tensor of shape (num_samples,) at 24kHz
+# Prepare inputs using `apply_transcription_request`
+inputs = processor.apply_transcription_request(
+    audio="https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/example_output/VibeVoice-1.5B_output.wav",
+).to(model.device, model.dtype)
 
-conversation = [
-    {
-        "role": "user",
-        "content": [
-            {"type": "text", "text": "Transcribe the following audio."},
-            {"type": "audio", "audio": audio},
-        ],
-    }
+# Apply model
+output_ids = model.generate(**inputs)
+
+# Print results
+generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
+transcription = processor.batch_decode(generated_ids)[0]
+print("\n" + "=" * 60)
+print("RAW OUTPUT")
+print("=" * 60)
+print(transcription)
+
+transcription = processor.batch_decode(generated_ids, return_as_dicts=True)[0]
+print("\n" + "=" * 60)
+print("TRANSCRIPTION (list of dicts)")
+print("=" * 60)
+for speaker_transcription in transcription:
+    print(speaker_transcription)
+
+# Remove speaker labels, only get raw transcription
+transcription = processor.batch_decode(generated_ids, extract_transcription=True)[0]
+print("\n" + "=" * 60)
+print("TRANSCRIPTION ONLY")
+print("=" * 60)
+print(transcription)
+
+"""
+============================================================
+RAW OUTPUT
+============================================================
+assistant
+[{"Start":0,"End":15.43,"Speaker":0,"Content":"Hello everyone and welcome to the Vibe Voice podcast. I'm your host, Alex, and today we're getting into one of the biggest debates in all of sports: who's the greatest basketball player of all time? I'm so excited to have Sam here to talk about it with me."},{"Start":15.43,"End":21.05,"Speaker":1,"Content":"Thanks so much for having me, Alex. And you're absolutely right. This question always brings out some seriously strong feelings."},{"Start":21.05,"End":31.66,"Speaker":0,"Content":"Okay, so let's get right into it. For me, it has to be Michael Jordan. Six trips to the finals, six championships. That kind of perfection is just incredible."},{"Start":31.66,"End":40.93,"Speaker":1,"Content":"Oh man, the first thing that always pops into my head is that shot against the Cleveland Cavaliers back in '89. Jordan just rises, hangs in the air forever, and just sinks it."}]
+
+============================================================
+TRANSCRIPTION (list of dicts)
+============================================================
+{'Start': 0, 'End': 15.43, 'Speaker': 0, 'Content': "Hello everyone and welcome to the Vibe Voice podcast. I'm your host, Alex, and today we're getting into one of the biggest debates in all of sports: who's the greatest basketball player of all time? I'm so excited to have Sam here to talk about it with me."}
+{'Start': 15.43, 'End': 21.05, 'Speaker': 1, 'Content': "Thanks so much for having me, Alex. And you're absolutely right. This question always brings out some seriously strong feelings."}
+{'Start': 21.05, 'End': 31.66, 'Speaker': 0, 'Content': "Okay, so let's get right into it. For me, it has to be Michael Jordan. Six trips to the finals, six championships. That kind of perfection is just incredible."}
+{'Start': 31.66, 'End': 40.93, 'Speaker': 1, 'Content': "Oh man, the first thing that always pops into my head is that shot against the Cleveland Cavaliers back in '89. Jordan just rises, hangs in the air forever, and just sinks it."}
+
+============================================================
+TRANSCRIPTION ONLY
+============================================================
+Hello everyone and welcome to the Vibe Voice podcast. I'm your host, Alex, and today we're getting into one of the biggest debates in all of sports: who's the greatest basketball player of all time? I'm so excited to have Sam here to talk about it with me. Thanks so much for having me, Alex. And you're absolutely right. This question always brings out some seriously strong feelings. Okay, so let's get right into it. For me, it has to be Michael Jordan. Six trips to the finals, six championships. That kind of perfection is just incredible. Oh man, the first thing that always pops into my head is that shot against the Cleveland Cavaliers back in '89. Jordan just rises, hangs in the air forever, and just sinks it.
+"""
+```
+
+The VibeVoice ASR model is trained to generate a string that resembles a JSON structure. The flag `return_as_dicts=True` tries to return the generated output as a list of dicts, while `extract_transcription=True` tries to extract only the transcribed audio. If they fail, the generated output is returned as-is.
+
+### Providing context
+
+It is also possible to provide context. This can be useful if certain words cannot be transcribed correctly, such as proper nouns.
+
+Below we transcribe an audio where the speaker (with a German accent) talks about VibeVoice, comparing with and without the context "About VibeVoice".
+
+```python
+from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
+
+
+model_id = "bezzam/VibeVoice-ASR-7B"
+
+
+# Load processor and model
+processor = AutoProcessor.from_pretrained(model_id)
+model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
+print(f"Model loaded on {model.device} with dtype {model.dtype}")
+
+# Without context
+inputs = processor.apply_transcription_request(
+    audio="https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav",
+).to(model.device, model.dtype)
+output_ids = model.generate(**inputs)
+generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
+transcription = processor.batch_decode(generated_ids, extract_transcription=True)[0]
+print(f"WITHOUT CONTEXT: {transcription}")
+
+# Without context
+inputs = processor.apply_transcription_request(
+    audio="https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav",
+    prompt="About VibeVoice",
+).to(model.device, model.dtype)
+output_ids = model.generate(**inputs)
+generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
+transcription = processor.batch_decode(generated_ids, extract_transcription=True)[0]
+print(f"WITH CONTEXT   : {transcription}")
+
+"""
+WITHOUT CONTEXT: Revevoices is a novel framework designed for generating expressive, long-form, multi-speaker conversational audio.
+WITH CONTEXT   : VibeVoice is this novel framework designed for generating expressive, long-form, multi-speaker, conversational audio.
+"""
+```
+
+
+### Batch inference
+
+Batch inference is possible by passing a list of audio and (if provided) a list of prompts of equal length.
+
+```python
+from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
+
+
+model_id = "bezzam/VibeVoice-ASR-7B"
+audio = [
+    "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav",
+    "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/example_output/VibeVoice-1.5B_output.wav"
 ]
+prompts = ["About VibeVoice", None]
 
-inputs = processor.apply_chat_template(
-    conversation,
-    tokenize=True,
-    add_generation_prompt=True,
-    return_dict=True,
-).to(model.device)
+# Load processor and model
+processor = AutoProcessor.from_pretrained(model_id)
+model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
+print(f"Model loaded on {model.device} with dtype {model.dtype}")
 
-outputs = model.generate(**inputs, max_new_tokens=500)
+# Apply model with batch inputs
+inputs = processor.apply_transcription_request(audio, prompt=prompts).to(model.device, model.dtype)
+output_ids = model.generate(**inputs)
+generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
+transcription = processor.batch_decode(generated_ids, extract_transcription=True)
 
-decoded_outputs = processor.batch_decode(outputs[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)
-print(decoded_outputs)
+print(transcription)
 ```
 
-### Transcription Shortcut
 
-For quick transcription without manually creating the conversation format:
+### Adjusting tokenizer chunk (e.g. if out-of-memory)
+
+A key feature of VibeVoice ASR is that it can transcribe up to 60 minutes of continuous audio. This is done by chunking audio into 60-second segments (1440000 samples at 24kHz) and caching the convolution states between each segment.
+
+However, if chunks of 60 seconds are too large for your device, the `tokenizer_chunk_size` argument passed to `generate` can be adjusted. *Note it should be a multiple of the hop length (3200 for the original acoustic tokenizer).*
 
 ```python
-from transformers import VibeVoiceASRForConditionalGeneration, AutoProcessor
-import torch
+from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
 
-model_id = "microsoft/VibeVoice-ASR"
+
+model_id = "bezzam/VibeVoice-ASR-7B"
+tokenizer_chunk_size = 64000    # default is 1440000 (60s @ 24kHz)
+audio = [
+    "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav",
+    "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/example_output/VibeVoice-1.5B_output.wav"
+]
+prompts = ["About VibeVoice", None]
+
+
+# Load processor and model
 processor = AutoProcessor.from_pretrained(model_id)
-model = VibeVoiceASRForConditionalGeneration.from_pretrained(model_id, device_map="auto")
+model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
+print(f"Model loaded on {model.device} with dtype {model.dtype}")
 
-# Load audio
-# audio = load_your_audio_here()
-
-inputs = processor.apply_transcription_request(audio=audio).to(model.device)
-
-outputs = model.generate(**inputs, max_new_tokens=500)
-decoded_outputs = processor.batch_decode(outputs[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)
-
-print(decoded_outputs)
+# Apply model with batch inputs
+inputs = processor.apply_transcription_request(audio, prompt=prompts).to(model.device, model.dtype)
+output_ids = model.generate(**inputs, tokenizer_chunk_size=tokenizer_chunk_size)
+generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
+transcription = processor.batch_decode(generated_ids, extract_transcription=True)
 ```
 
-### Batched Inference
 
-Process multiple audio files simultaneously:
 
+### Chat template
+
+VibeVoice ASR also accepts chat template inputs (`apply_transcription_request` is actually a wrapper for convenience):
 ```python
-from transformers import VibeVoiceASRForConditionalGeneration, AutoProcessor
+from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
 
-model_id = "microsoft/VibeVoice-ASR"
+
+model_id = "bezzam/VibeVoice-ASR-7B"
+
+# Load processor and model
 processor = AutoProcessor.from_pretrained(model_id)
-model = VibeVoiceASRForConditionalGeneration.from_pretrained(model_id, device_map="auto")
+model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
 
-# Load multiple audios
-# audio1 = load_audio_1()
-# audio2 = load_audio_2()
-
-conversations = [
+# Prepare chat template
+chat_template = [
     [
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "Transcribe the following audio."},
-                {"type": "audio", "audio": audio1},
+                {"type": "text", "text": "About VibeVoice"},
+                {
+                    "type": "audio",
+                    "path": "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav",
+                },
             ],
         }
     ],
@@ -138,236 +258,110 @@ conversations = [
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "What is said in this recording?"},
-                {"type": "audio", "audio": audio2},
+                {
+                    "type": "audio",
+                    "path": "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/example_output/VibeVoice-1.5B_output.wav",
+                },
             ],
         }
     ],
 ]
 
+# Prepare inputs
 inputs = processor.apply_chat_template(
-    conversations,
+    chat_template,
     tokenize=True,
-    add_generation_prompt=True,
     return_dict=True,
-).to(model.device)
+).to(model.device, model.dtype)
 
-outputs = model.generate(**inputs, max_new_tokens=500)
+# Apply model
+output_ids = model.generate(**inputs)
+generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
+transcription = processor.batch_decode(generated_ids, extract_transcription=True)
 
-decoded_outputs = processor.batch_decode(outputs[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)
-print(decoded_outputs)
-```
-
-### Multi-turn Conversations
-
-VibeVoice ASR supports multi-turn dialogues about audio content:
-
-```python
-from transformers import VibeVoiceASRForConditionalGeneration, AutoProcessor
-
-model_id = "microsoft/VibeVoice-ASR"
-processor = AutoProcessor.from_pretrained(model_id)
-model = VibeVoiceASRForConditionalGeneration.from_pretrained(model_id, device_map="auto")
-
-conversation = [
-    {
-        "role": "user",
-        "content": [
-            {"type": "text", "text": "What is being discussed in this audio?"},
-            {"type": "audio", "audio": audio},
-        ],
-    },
-    {
-        "role": "assistant",
-        "content": [{"type": "text", "text": "The audio discusses machine learning techniques."}],
-    },
-    {
-        "role": "user",
-        "content": [
-            {"type": "text", "text": "Can you provide more details about the specific techniques mentioned?"},
-        ],
-    },
-]
-
-inputs = processor.apply_chat_template(
-    conversation,
-    tokenize=True,
-    add_generation_prompt=True,
-    return_dict=True,
-).to(model.device)
-
-outputs = model.generate(**inputs, max_new_tokens=500)
-
-decoded_outputs = processor.batch_decode(outputs[:, inputs["input_ids"].shape[1]:], skip_special_tokens=True)
-print(decoded_outputs)
+print(transcription)
 ```
 
 ### Training
 
-Fine-tune the model on your own ASR dataset:
+VibeVoice ASR can be trained, the model outputs a loss
+
 
 ```python
-from transformers import VibeVoiceASRForConditionalGeneration, AutoProcessor
+from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
 
-model_id = "microsoft/VibeVoice-ASR"
+
+model_id = "bezzam/VibeVoice-ASR-7B"
+
+# Load processor and model
 processor = AutoProcessor.from_pretrained(model_id)
-model = VibeVoiceASRForConditionalGeneration.from_pretrained(model_id, device_map="auto")
+model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
 model.train()
 
-conversations = [
+# Prepare inputs (batch of 2)
+# -- NOTE: original model outputs content, speaker ID, and timestamps in JSON-like format. Below we are only using the transcription text.
+chat_template = [
     [
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "Transcribe the following audio."},
-                {"type": "audio", "audio": audio1},
+                {"type": "text", "text": "VibeVoice is this novel framework designed for generating expressive, long-form, multi-speaker, conversational audio."},
+                {
+                    "type": "audio",
+                    "path": "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav",
+                },
             ],
-        },
-        {
-            "role": "assistant",
-            "content": [{"type": "text", "text": "This is the correct transcription of audio one."}],
         }
     ],
     [
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "What is said in this recording?"},
-                {"type": "audio", "audio": audio2},
+                {"type": "text", "text": "Hello everyone and welcome to the VibeVoice podcast. I'm your host, Alex, and today we're getting into one of the biggest debates in all of sports: who's the greatest basketball player of all time? I'm so excited to have Sam here to talk about it with me. Thanks so much for having me, Alex. And you're absolutely right. This question always brings out some seriously strong feelings. Okay, so let's get right into it. For me, it has to be Michael Jordan. Six trips to the finals, six championships. That kind of perfection is just incredible. Oh man, the first thing that always pops into my head is that shot against the Cleveland Cavaliers back in '89. Jordan just rises, hangs in the air forever, and just sinks it."},
+                {
+                    "type": "audio",
+                    "path": "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/example_output/VibeVoice-1.5B_output.wav",
+                },
             ],
-        },
-        {
-            "role": "assistant",
-            "content": [{"type": "text", "text": "This is the transcription of audio two."}],
         }
-    ]
+    ],
 ]
-
 inputs = processor.apply_chat_template(
-    conversations,
+    chat_template,
     tokenize=True,
-    add_generation_prompt=True,
     return_dict=True,
     output_labels=True,
-).to(model.device)
+).to(model.device, model.dtype)
 
+# Apply model and backpropagate loss
 loss = model(**inputs).loss
+print("Loss:", loss.item())
 loss.backward()
 ```
 
-## How the Model Works
 
-### Architecture
+## VibeVoiceAsrEncoderConfig
 
-VibeVoice ASR consists of three main components:
+[[autodoc]] VibeVoiceAsrEncoderConfig
 
-* **Acoustic Tokenizer**
-  A VibeVoice acoustic tokenizer that processes raw audio waveforms at 24kHz. The tokenizer uses a ConvNeXt-style encoder with downsampling to produce acoustic latent representations.
+## VibeVoiceAsrConfig
 
-* **Semantic Tokenizer**
-  A second VibeVoice tokenizer that extracts semantic information from the same audio input. This provides complementary features focused on linguistic content rather than acoustic details.
+[[autodoc]] VibeVoiceAsrConfig
 
-* **Speech Connectors**
-  Two-layer MLPs with RMSNorm that project both acoustic and semantic features to the language model's hidden size. The features are combined additively before being used.
+## VibeVoiceAsrProcessor
 
-* **Language Model**
-  A Qwen2-based causal language model that processes text embeddings with audio frame embeddings replacing audio placeholder tokens in place.
-
-### Audio Processing Pipeline
-
-1. **Dual Encoding**: Raw audio is encoded by both the acoustic and semantic tokenizers independently, producing two sets of latent representations.
-
-2. **Feature Projection**: Each set of latents is projected to the language model dimension using its respective speech connector.
-
-3. **Feature Fusion**: Acoustic and semantic features are added together element-wise.
-
-4. **Token Replacement**: The fused audio features replace audio placeholder tokens (`<audio>`) in the input embedding sequence.
-
-5. **Generation**: The language model generates text tokens autoregressively, with audio information influencing predictions through the replaced embeddings.
-
-### Streaming for Long Audio
-
-For very long audio files (>60 seconds by default), VibeVoice ASR automatically uses streaming processing:
-
-* Audio is split into 60-second segments (configurable via `streaming_segment_duration`).
-* Each segment is encoded separately using streaming cache mechanisms.
-* Encoded segments are concatenated and sampled together to maintain consistency.
-* This prevents memory issues and computational overflow for very long recordings.
-
-## Usage Patterns
-
-### Custom Prompts
-
-While transcription is the primary use case, you can customize prompts:
-
-```python
-inputs = processor.apply_transcription_request(
-    audio=audio,
-    prompt="Provide a detailed transcription with punctuation."
-)
-```
-
-### Audio Token Expansion
-
-The processor automatically:
-1. Calculates the number of audio tokens based on the audio length and tokenizer hop length (6400 samples at 24kHz ≈ 0.267 seconds per frame).
-2. Expands `<audio>` placeholder tokens in the text to match the number of audio frames.
-3. Creates an `acoustic_input_mask` to indicate which tokens should be replaced with audio embeddings.
-
-### Attention and Masking
-
-* **Attention masks**: The processor returns standard attention masks for text tokens.
-* **Acoustic input mask**: A boolean mask indicating positions where audio embeddings replace text embeddings.
-* **Caching**: During generation, audio inputs are only processed on the first forward pass. Subsequent steps use cached key-value pairs.
-
-## Troubleshooting
-
-### Audio Format Issues
-
-* Ensure audio is sampled at 24kHz. If your audio is at a different sample rate, resample it:
-  ```python
-  import torchaudio
-  waveform, sample_rate = torchaudio.load("audio.wav")
-  if sample_rate != 24000:
-      resampler = torchaudio.transforms.Resample(sample_rate, 24000)
-      waveform = resampler(waveform)
-  ```
-
-* Audio should be a 1D tensor (mono). If stereo, convert to mono:
-  ```python
-  if waveform.shape[0] > 1:
-      waveform = waveform.mean(dim=0, keepdim=True)
-  ```
-
-### Empty or Truncated Outputs
-
-* Use left padding for batched generation.
-* Decode only the new tokens after the prompt length.
-* Ensure `max_new_tokens` is sufficient for your expected transcription length.
-
-### Memory Issues with Long Audio
-
-* The model automatically switches to streaming mode for audio longer than the `streaming_segment_duration` (default 60s).
-* You can adjust this parameter in the `encode_speech` method if needed.
-* For extremely long audio, consider splitting it manually and processing in batches.
-
-## VibeVoiceASRConfig
-
-[[autodoc]] VibeVoiceASRConfig
-
-## VibeVoiceASRProcessor
-
-[[autodoc]] VibeVoiceASRProcessor
+[[autodoc]] VibeVoiceAsrProcessor
     - __call__
     - apply_transcription_request
+    - batch_decode
 
-## VibeVoiceASRModel
+## VibeVoiceAsrEncoderModel
 
-[[autodoc]] VibeVoiceASRModel
+[[autodoc]] VibeVoiceAsrEncoderModel
     - forward
 
-## VibeVoiceASRForConditionalGeneration
+## VibeVoiceAsrForConditionalGeneration
 
-[[autodoc]] VibeVoiceASRForConditionalGeneration
+[[autodoc]] VibeVoiceAsrForConditionalGeneration
     - forward
-    - encode_speech
+    - get_audio_features

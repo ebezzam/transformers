@@ -19,7 +19,7 @@ from torch import nn
 
 from ...configuration_utils import PretrainedConfig
 from ...modeling_outputs import CausalLMOutputWithPast
-from ...utils import auto_docstring, can_return_tuple
+from ...utils import auto_docstring, can_return_tuple, logging
 from ..audioflamingo3.modeling_audioflamingo3 import AudioFlamingo3ForConditionalGeneration
 from ..auto import CONFIG_MAPPING, AutoConfig, AutoModel
 from ..mimi.modeling_mimi import MimiConv1dPaddingCache
@@ -30,6 +30,9 @@ from ..vibevoice_acoustic_tokenizer.modeling_vibevoice_acoustic_tokenizer import
     VibeVoiceAcousticTokenizerModel,
     VibeVoiceAcousticTokenizerPreTrainedModel,
 )
+
+
+logger = logging.get_logger(__name__)
 
 
 class VibeVoiceAsrEncoderConfig(VibeVoiceAcousticTokenizerConfig):
@@ -275,12 +278,12 @@ class VibeVoiceAsrPreTrainedModel(VibeVoiceAcousticTokenizerPreTrainedModel):
     config: VibeVoiceAsrConfig
     base_model_prefix = "model"
     main_input_name = "input_ids"
+    _no_split_modules = None
     input_modalities = ("audio", "text")
     supports_gradient_checkpointing = True
     _skip_keys_device_placement = "past_key_values"
     _supports_cache_class = True
     _supports_sdpa = True
-    _no_split_modules = ["VibeVoiceAsrEncoderLayer"]
     _supports_attention_backend = True
 
 
@@ -300,15 +303,15 @@ class VibeVoiceAsrEncoderModel(VibeVoiceAcousticTokenizerModel):
         super().__init__(config)
         del self.decoder
 
-    def encode(self, audio, padding_cache=None, use_cache=None):
+    def encode(self, input_values, padding_cache=None, use_cache=None, sample=True):
         raise NotImplementedError("Encode method is not implemented.")
 
     def decode(self, latents, padding_cache=None, use_cache=False):
         raise NotImplementedError("Decode method is not implemented.")
 
-    def forward(self, audio, padding_cache=None, use_cache=None, **kwargs):
+    def forward(self, input_values, padding_cache=None, use_cache=None, **kwargs):
         r"""
-        audio (`torch.FloatTensor` of shape `(batch_size, channels, sequence_length)`):
+        input_values (`torch.FloatTensor` of shape `(batch_size, channels, sequence_length)`):
             Input audio waveform to be encoded into latent representations.
         padding_cache (`VibeVoiceAsrConv1dPaddingCache`, *optional*):
             Cache object for streaming mode to maintain convolution states across layers.
@@ -322,7 +325,7 @@ class VibeVoiceAsrEncoderModel(VibeVoiceAcousticTokenizerModel):
                 per_layer_padding_mode=self.encoder.per_conv_layer_padding_mode,
                 per_layer_in_channels=self.encoder.per_conv_layer_in_channels,
             )
-        latents = self.encoder(audio, padding_cache=padding_cache)
+        latents = self.encoder(input_values, padding_cache=padding_cache)
 
         return VibeVoiceAsrEncoderOutput(
             latents=latents,
@@ -363,6 +366,13 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
 
         if tokenizer_chunk_size is None:
             tokenizer_chunk_size = self.config.tokenizer_chunk_size
+        else:
+            hop_length = np.prod(self.acoustic_tokenizer.config.downsampling_ratios)
+            if tokenizer_chunk_size % hop_length != 0:
+                tokenizer_chunk_size = int((tokenizer_chunk_size // hop_length) * hop_length)
+                logger.warning(
+                    f"`tokenizer_chunk_size` has been adjusted to {tokenizer_chunk_size} to be a multiple of hop length ({hop_length})."
+                )
 
         with torch.no_grad():
             acoustic_encoder_cache = None
