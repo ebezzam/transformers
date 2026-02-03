@@ -34,7 +34,15 @@ from ..vibevoice_acoustic_tokenizer.modeling_vibevoice_acoustic_tokenizer import
 
 class VibeVoiceAsrEncoderConfig(VibeVoiceAcousticTokenizerConfig):
     r"""
-    This is the configuration class to store the configuration of a [`VibeVoiceAsrEncoderModel`].
+    This is the configuration class to store the configuration of a [`VibeVoiceAsrEncoderModel`]. It is used to
+    instantiate a VibeVoice audio encoder according to the specified arguments, defining the model architecture.
+    Instantiating a configuration with the defaults will yield a similar configuration to that of the acoustic
+    tokenizer encoder of the VibeVoice-ASR architecture.
+
+    e.g. [microsoft/VibeVoice-ASR](https://huggingface.co/microsoft/VibeVoice-ASR)
+
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
         channels (`int`, *optional*, defaults to 1):
@@ -276,7 +284,7 @@ class VibeVoiceAsrPreTrainedModel(VibeVoiceAcousticTokenizerPreTrainedModel):
     _supports_attention_backend = True
 
 
-class VibeVoiceAsrModelOutput(VibeVoiceAcousticTokenizerEncoderOutput):
+class VibeVoiceAsrEncoderOutput(VibeVoiceAcousticTokenizerEncoderOutput):
     pass
 
 
@@ -316,7 +324,7 @@ class VibeVoiceAsrEncoderModel(VibeVoiceAcousticTokenizerModel):
             )
         latents = self.encoder(audio, padding_cache=padding_cache)
 
-        return VibeVoiceAsrModelOutput(
+        return VibeVoiceAsrEncoderOutput(
             latents=latents,
             padding_cache=padding_cache if use_cache else None,
         )
@@ -342,7 +350,7 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
         input_values: torch.FloatTensor,
         padding_mask: torch.BoolTensor | None = None,
         tokenizer_chunk_size: int | None = None,
-    ) -> tuple | VibeVoiceAsrModelOutput:
+    ) -> tuple | VibeVoiceAsrEncoderOutput:
         r"""
         input_values (`torch.FloatTensor` of shape `(batch_size, num_samples)`):
             Input audio tensor. Audio should be sampled at 24kHz.
@@ -396,7 +404,7 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
             padding_mask = torch.arange(max(num_audio_tokens)) < num_audio_tokens[:, None].cpu()
             combined_features = combined_features[padding_mask]
 
-        return VibeVoiceAsrModelOutput(latents=combined_features)
+        return VibeVoiceAsrEncoderOutput(latents=combined_features)
 
     @can_return_tuple
     @auto_docstring

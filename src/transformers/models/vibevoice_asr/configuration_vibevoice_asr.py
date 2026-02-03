@@ -25,7 +25,15 @@ from ..auto import CONFIG_MAPPING, AutoConfig
 
 class VibeVoiceAsrEncoderConfig(PretrainedConfig):
     r"""
-    This is the configuration class to store the configuration of a [`VibeVoiceAsrEncoderModel`].
+    This is the configuration class to store the configuration of a [`VibeVoiceAsrEncoderModel`]. It is used to
+    instantiate a VibeVoice audio encoder according to the specified arguments, defining the model architecture.
+    Instantiating a configuration with the defaults will yield a similar configuration to that of the acoustic
+    tokenizer encoder of the VibeVoice-ASR architecture.
+
+    e.g. [microsoft/VibeVoice-ASR](https://huggingface.co/microsoft/VibeVoice-ASR)
+
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
         channels (`int`, *optional*, defaults to 1):

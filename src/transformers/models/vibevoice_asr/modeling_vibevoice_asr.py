@@ -294,7 +294,7 @@ class VibeVoiceAsrPreTrainedModel(PreTrainedModel):
 
 @dataclass
 @auto_docstring
-class VibeVoiceAsrModelOutput(ModelOutput):
+class VibeVoiceAsrEncoderOutput(ModelOutput):
     r"""
     latents (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
         Projected latents (continuous representations for acoustic tokens) at the output of the encoder.
@@ -437,7 +437,7 @@ class VibeVoiceAsrEncoderModel(VibeVoiceAsrPreTrainedModel):
             )
         latents = self.encoder(audio, padding_cache=padding_cache)
 
-        return VibeVoiceAsrModelOutput(
+        return VibeVoiceAsrEncoderOutput(
             latents=latents,
             padding_cache=padding_cache if use_cache else None,
         )
@@ -489,7 +489,7 @@ class VibeVoiceAsrForConditionalGeneration(VibeVoiceAsrPreTrainedModel, Generati
         input_values: torch.FloatTensor,
         padding_mask: torch.BoolTensor | None = None,
         tokenizer_chunk_size: int | None = None,
-    ) -> tuple | VibeVoiceAsrModelOutput:
+    ) -> tuple | VibeVoiceAsrEncoderOutput:
         r"""
         input_values (`torch.FloatTensor` of shape `(batch_size, num_samples)`):
             Input audio tensor. Audio should be sampled at 24kHz.
@@ -543,7 +543,7 @@ class VibeVoiceAsrForConditionalGeneration(VibeVoiceAsrPreTrainedModel, Generati
             padding_mask = torch.arange(max(num_audio_tokens)) < num_audio_tokens[:, None].cpu()
             combined_features = combined_features[padding_mask]
 
-        return VibeVoiceAsrModelOutput(latents=combined_features)
+        return VibeVoiceAsrEncoderOutput(latents=combined_features)
 
     @can_return_tuple
     @auto_docstring
