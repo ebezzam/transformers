@@ -62,10 +62,10 @@ class VibeVoiceAcousticTokenizerModelTester:
         self.depths = depths
 
     def prepare_config_and_inputs(self):
-        audio = floats_tensor([self.batch_size, self.channels, self.hidden_size], scale=1.0)
+        input_values = floats_tensor([self.batch_size, self.channels, self.hidden_size], scale=1.0)
         config = self.get_config()
         # disable sampling for deterministic tests
-        inputs_dict = {"audio": audio, "sample": False}
+        inputs_dict = {"input_values": input_values, "sample": False}
         return config, inputs_dict
 
     def prepare_config_and_inputs_for_common(self):
@@ -73,10 +73,10 @@ class VibeVoiceAcousticTokenizerModelTester:
         return config, inputs_dict
 
     def prepare_config_and_inputs_for_model_class(self, model_class):
-        audio = floats_tensor([self.batch_size, self.channels, self.hidden_size], scale=1.0)
+        input_values = floats_tensor([self.batch_size, self.channels, self.hidden_size], scale=1.0)
         config = self.get_config()
         # disable sampling for deterministic tests
-        inputs_dict = {"audio": audio, "sample": False}
+        inputs_dict = {"input_values": input_values, "sample": False}
 
         return config, inputs_dict
 
@@ -93,13 +93,12 @@ class VibeVoiceAcousticTokenizerModelTester:
     def create_and_check_model_forward(self, config, inputs_dict):
         model = VibeVoiceAcousticTokenizerModel(config=config).to(torch_device).eval()
 
-        audio = inputs_dict["audio"]
-        result = model(audio)
+        input_values = inputs_dict["input_values"]
+        result = model(input_values)
 
         # Calculate expected sequence length after downsampling
         expected_seq_len = self.hidden_size // np.prod(self.downsampling_ratios)
         self.parent.assertEqual(result.latents.shape, (self.batch_size, expected_seq_len, self.hidden_size))
-        # Acoustic tokenizer should reconstruct audio
         self.parent.assertEqual(result.audio.shape, (self.batch_size, self.channels, self.hidden_size))
 
 
@@ -146,7 +145,7 @@ class VibeVoiceAcousticTokenizerModelTest(ModelTesterMixin, unittest.TestCase):
             signature = inspect.signature(model.forward)
             arg_names = [*signature.parameters.keys()]
 
-            expected_arg_names = ["audio", "padding_cache", "use_cache", "sample"]
+            expected_arg_names = ["input_values", "padding_cache", "use_cache", "sample"]
             self.assertListEqual(arg_names[: len(expected_arg_names)], expected_arg_names)
 
     @unittest.skip("VibeVoiceAcousticTokenizerModel does not have `inputs_embeds` logic")
@@ -169,9 +168,9 @@ class VibeVoiceAcousticTokenizerModelTest(ModelTesterMixin, unittest.TestCase):
     def test_hidden_states_output(self):
         pass
 
-    @unittest.skip(reason="From CI 'UnboundLocalError: local variable output referenced before assignment'")
-    def test_model_parallelism(self):
-        pass
+    # @unittest.skip(reason="From CI 'UnboundLocalError: local variable output referenced before assignment'")
+    # def test_model_parallelism(self):
+    #     pass
 
     def test_determinism(self):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
@@ -249,7 +248,7 @@ class VibeVoiceAcousticTokenizerModelTest(ModelTesterMixin, unittest.TestCase):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs()
         model = VibeVoiceAcousticTokenizerModel(config=config).to(torch_device).eval()
 
-        audio = inputs_dict["audio"]
+        audio = inputs_dict["input_values"]
         with torch.no_grad():
             output = model.encode(audio)
 
@@ -263,14 +262,12 @@ class VibeVoiceAcousticTokenizerModelTest(ModelTesterMixin, unittest.TestCase):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs()
         model = VibeVoiceAcousticTokenizerModel(config=config).to(torch_device).eval()
 
-        # First encode to get latents
-        audio = inputs_dict["audio"]
+        audio = inputs_dict["input_values"]
         with torch.no_grad():
             encode_output = model.encode(audio)
             decode_output = model.decode(encode_output.latents)
 
         self.assertIsNotNone(decode_output.audio)
-        # Decoder should reconstruct to original audio shape
         self.assertEqual(
             decode_output.audio.shape,
             (self.model_tester.batch_size, self.model_tester.channels, self.model_tester.hidden_size),
@@ -280,9 +277,9 @@ class VibeVoiceAcousticTokenizerModelTest(ModelTesterMixin, unittest.TestCase):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs()
         model = VibeVoiceAcousticTokenizerModel(config=config).to(torch_device).eval()
 
-        audio = inputs_dict["audio"]
+        input_values = inputs_dict["input_values"]
         with torch.no_grad():
-            output = model(audio, use_cache=True)
+            output = model(input_values, use_cache=True)
 
         self.assertIsNotNone(output.padding_cache)
         self.assertIsNotNone(output.latents)

@@ -82,10 +82,6 @@ def map_old_key_to_new(old_key: str) -> str:
         else:
             new_key, n = re.subn(pattern, replacement, new_key)
 
-    if "stem.conv.conv" not in new_key and "stem.convtr.convtr" not in new_key and "conv_layers." not in new_key:
-        # Fix remaining .conv.conv. patterns (but not stem.conv.conv or conv_layers.*.conv.conv)
-        new_key = re.sub(r"\.conv\.conv\.", r".conv.", new_key)
-
     return new_key
 
 
@@ -95,8 +91,6 @@ def convert_state_dict(original_state_dict: dict[str, Any]) -> dict[str, Any]:
     for old_key, tensor in original_state_dict.items():
         new_key = map_old_key_to_new(old_key)
         new_state_dict[new_key] = tensor
-
-        # Log conversions for debugging (optional)
         if old_key != new_key:
             logger.debug(f"Converted: {old_key} -> {new_key}")
 
@@ -142,13 +136,11 @@ def convert_checkpoint(checkpoint, config_path, push_to_hub, bfloat16, processor
     if "encoder_ratios" in acoustic_config_dict:
         acoustic_config_dict["downsampling_ratios"] = list(reversed(acoustic_config_dict.pop("encoder_ratios")))
     if "encoder_n_filters" in acoustic_config_dict:
-        acoustic_config_dict["n_filters"] = acoustic_config_dict.pop("encoder_n_filters")
+        acoustic_config_dict["num_filters"] = acoustic_config_dict.pop("encoder_n_filters")
     if "encoder_depths" in acoustic_config_dict:
         acoustic_config_dict["depths"] = acoustic_config_dict.pop("encoder_depths")
     if "vae_dim" in acoustic_config_dict:
         acoustic_config_dict["hidden_size"] = acoustic_config_dict.pop("vae_dim")
-    if "conv_bias" in acoustic_config_dict:
-        acoustic_config_dict["bias"] = acoustic_config_dict.pop("conv_bias")
     if "fix_std" in acoustic_config_dict:
         # Original hardcodes a scaling factor for vae_std
         acoustic_config_dict["vae_std"] = acoustic_config_dict.pop("fix_std") / 0.8
@@ -160,6 +152,7 @@ def convert_checkpoint(checkpoint, config_path, push_to_hub, bfloat16, processor
         "decoder_ratios",
         "std_dist_type",
         "pad_mode",
+        "conv_bias",
         "causal",
         "mixer_layer",
         "layernorm",
@@ -187,7 +180,6 @@ def convert_checkpoint(checkpoint, config_path, push_to_hub, bfloat16, processor
     # Load weights into HF model
     logger.info("Loading weights into model")
     missing, unexpected = acoustic_model.load_state_dict(acoustic_state_dict, strict=False)
-
     if len(unexpected) != 0:
         raise ValueError(f"Unexpected keys: {unexpected}")
     if len(missing) != 0:

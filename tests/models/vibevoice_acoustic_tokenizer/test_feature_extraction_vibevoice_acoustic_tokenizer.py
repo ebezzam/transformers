@@ -164,11 +164,9 @@ class VibeVoiceAcousticTokenizerFeatureExtractionTest(SequenceFeatureExtractionT
         feature_extractor = VibeVoiceAcousticTokenizerFeatureExtractor(sampling_rate=24000)
         input_audio = np.random.randn(1000).astype(np.float32)
 
-        # Should work with correct sampling rate
         result = feature_extractor([input_audio], sampling_rate=24000)
         self.assertIsInstance(result.input_values, torch.Tensor)
 
-        # Should raise error with incorrect sampling rate
         with self.assertRaises(ValueError):
             feature_extractor([input_audio], sampling_rate=16000)
 
@@ -178,7 +176,6 @@ class VibeVoiceAcousticTokenizerFeatureExtractionTest(SequenceFeatureExtractionT
         audio1 = np.random.randn(100).astype(np.float32)
         audio2 = np.random.randn(200).astype(np.float32)
 
-        # Should have padding_mask
         result = feature_extractor([audio1, audio2], padding=True, return_attention_mask=True)
         self.assertIn("padding_mask", result)
         self.assertEqual(result.padding_mask.shape, result.input_values.squeeze(1).shape)
