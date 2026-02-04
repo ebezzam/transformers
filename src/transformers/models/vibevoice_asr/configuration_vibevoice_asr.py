@@ -38,7 +38,7 @@ class VibeVoiceAsrEncoderConfig(PretrainedConfig):
     Args:
         channels (`int`, *optional*, defaults to 1):
             Number of input channels.
-        hidden_size (`int`, *optional*, defaults to 128):
+        hidden_size (`int`, *optional*, defaults to 64):
             Dimensionality of latent representations.
         kernel_size (`int`, *optional*, defaults to 7):
             Kernel size for convolutional layers.
@@ -58,7 +58,6 @@ class VibeVoiceAsrEncoderConfig(PretrainedConfig):
             Activation function to use.
         ffn_expansion (`int`, *optional*, defaults to 4):
             Expansion factor for feed-forward networks.
-    Example:
 
     ```python
     >>> from transformers import VibeVoiceAsrEncoderModel, VibeVoiceAsrEncoderConfig
