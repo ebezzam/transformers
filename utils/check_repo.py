@@ -215,6 +215,7 @@ IGNORE_NON_TESTED = (
         "Ernie4_5_VL_MoeTextModel",  # Building part of bigger (tested) model
         "PeAudioFrameLevelModel",
         "PeAudioVideoModel",
+        "VibeVoiceAsrEncoderModel",  # Tested through VibeVoiceAsrForConditionalGeneration
     ]
 )
 
