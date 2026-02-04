@@ -56,10 +56,7 @@ A notable feature of VibeVoice ASR is its ability to transcribe multi-speaker co
 ```python
 from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
 
-
 model_id = "bezzam/VibeVoice-ASR-7B"
-
-# Load processor and model
 processor = AutoProcessor.from_pretrained(model_id)
 model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
 print(f"Model loaded on {model.device} with dtype {model.dtype}")
@@ -71,8 +68,6 @@ inputs = processor.apply_transcription_request(
 
 # Apply model
 output_ids = model.generate(**inputs)
-
-# Print results
 generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
 transcription = processor.batch_decode(generated_ids)[0]
 print("\n" + "=" * 60)
@@ -127,11 +122,7 @@ Below we transcribe an audio where the speaker (with a German accent) talks abou
 ```python
 from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
 
-
 model_id = "bezzam/VibeVoice-ASR-7B"
-
-
-# Load processor and model
 processor = AutoProcessor.from_pretrained(model_id)
 model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
 print(f"Model loaded on {model.device} with dtype {model.dtype}")
@@ -145,7 +136,7 @@ generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
 transcription = processor.batch_decode(generated_ids, extract_transcription=True)[0]
 print(f"WITHOUT CONTEXT: {transcription}")
 
-# Without context
+# With context
 inputs = processor.apply_transcription_request(
     audio="https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav",
     prompt="About VibeVoice",
@@ -168,7 +159,6 @@ Batch inference is possible by passing a list of audio and (if provided) a list 
 ```python
 from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
 
-
 model_id = "bezzam/VibeVoice-ASR-7B"
 audio = [
     "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav",
@@ -176,12 +166,10 @@ audio = [
 ]
 prompts = ["About VibeVoice", None]
 
-# Load processor and model
 processor = AutoProcessor.from_pretrained(model_id)
 model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
 print(f"Model loaded on {model.device} with dtype {model.dtype}")
 
-# Apply model with batch inputs
 inputs = processor.apply_transcription_request(audio, prompt=prompts).to(model.device, model.dtype)
 output_ids = model.generate(**inputs)
 generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
@@ -199,22 +187,18 @@ However, if chunks of 60 seconds are too large for your device, the `tokenizer_c
 ```python
 from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
 
-
-model_id = "bezzam/VibeVoice-ASR-7B"
 tokenizer_chunk_size = 64000    # default is 1440000 (60s @ 24kHz)
+model_id = "bezzam/VibeVoice-ASR-7B"
 audio = [
     "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav",
     "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/example_output/VibeVoice-1.5B_output.wav"
 ]
 prompts = ["About VibeVoice", None]
 
-
-# Load processor and model
 processor = AutoProcessor.from_pretrained(model_id)
 model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
 print(f"Model loaded on {model.device} with dtype {model.dtype}")
 
-# Apply model with batch inputs
 inputs = processor.apply_transcription_request(audio, prompt=prompts).to(model.device, model.dtype)
 output_ids = model.generate(**inputs, tokenizer_chunk_size=tokenizer_chunk_size)
 generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
@@ -223,18 +207,14 @@ transcription = processor.batch_decode(generated_ids, extract_transcription=True
 
 ### Chat template
 
-VibeVoice ASR also accepts chat template inputs (`apply_transcription_request` is actually a wrapper for convenience):
+VibeVoice ASR also accepts chat template inputs (`apply_transcription_request` is actually a wrapper for `apply_chat_template` for convenience):
 ```python
 from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
 
-
 model_id = "bezzam/VibeVoice-ASR-7B"
-
-# Load processor and model
 processor = AutoProcessor.from_pretrained(model_id)
 model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
 
-# Prepare chat template
 chat_template = [
     [
         {
@@ -261,18 +241,15 @@ chat_template = [
     ],
 ]
 
-# Prepare inputs
 inputs = processor.apply_chat_template(
     chat_template,
     tokenize=True,
     return_dict=True,
 ).to(model.device, model.dtype)
 
-# Apply model
 output_ids = model.generate(**inputs)
 generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
 transcription = processor.batch_decode(generated_ids, extract_transcription=True)
-
 print(transcription)
 ```
 
@@ -280,20 +257,16 @@ print(transcription)
 
 VibeVoice ASR can be trained with the loss outputted by the model.
 
-
 ```python
 from transformers import AutoProcessor, VibeVoiceAsrForConditionalGeneration
 
-
 model_id = "bezzam/VibeVoice-ASR-7B"
-
-# Load processor and model
 processor = AutoProcessor.from_pretrained(model_id)
 model = VibeVoiceAsrForConditionalGeneration.from_pretrained(model_id, device_map="auto")
 model.train()
 
-# Prepare inputs (batch of 2)
-# -- NOTE: original model outputs content, speaker ID, and timestamps in JSON-like format. Below we are only using the transcription text.
+# Prepare batch of 2
+# -- NOTE: the original model is trained to output transcription, speaker ID, and timestamps in JSON-like format. Below we are only using the transcription text as the label
 chat_template = [
     [
         {
@@ -327,7 +300,6 @@ inputs = processor.apply_chat_template(
     output_labels=True,
 ).to(model.device, model.dtype)
 
-# Apply model and backpropagate loss
 loss = model(**inputs).loss
 print("Loss:", loss.item())
 loss.backward()
