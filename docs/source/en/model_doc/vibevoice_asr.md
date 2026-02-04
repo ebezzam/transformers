@@ -25,7 +25,7 @@ rendered properly in your Markdown viewer.
 
 ## Overview
 
-VibeVoice ASR is an automatic speech recognition model from Microsoft that combines acoustic and semantic audio tokenizers with a causal language model for robust speech-to-text transcription. The model uses VibeVoice's proprietary acoustic tokenizers that process audio at 24kHz, paired with a Qwen2-based language decoder for generating transcriptions. See the [technical report](https://huggingface.co/papers/2601.18184) for more details.
+VibeVoice ASR is an automatic speech recognition model from Microsoft that combines acoustic and semantic audio tokenizers with a causal language model for robust speech-to-text transcription. The model uses VibeVoice's acoustic and semantic tokenizers that process audio at 24kHz, paired with a Qwen2-based language decoder for generating transcriptions. See the [technical report](https://huggingface.co/papers/2601.18184) for more details.
 
 The model checkpoint is available at: [microsoft/VibeVoice-ASR](https://huggingface.co/microsoft/VibeVoice-ASR)
 
@@ -43,14 +43,11 @@ Highlights:
 - **🌍 Multilingual & Code-Switching Support**:
   It supports over 50 languages, requires no explicit language setting, and natively handles code-switching within and across utterances. Language distribution can be found [here](#language-distribution).
 
-
 This model was contributed by [Eric Bezzam](https://huggingface.co/bezzam).
-
 
 ## Usage
 
 The model supports various automatic speech recognition functionalities.
-
 
 ### Speaker-timestamped transcription
 
@@ -164,7 +161,6 @@ WITH CONTEXT   : VibeVoice is this novel framework designed for generating expre
 """
 ```
 
-
 ### Batch inference
 
 Batch inference is possible by passing a list of audio and (if provided) a list of prompts of equal length.
@@ -193,7 +189,6 @@ transcription = processor.batch_decode(generated_ids, extract_transcription=True
 
 print(transcription)
 ```
-
 
 ### Adjusting tokenizer chunk (e.g. if out-of-memory)
 
@@ -225,8 +220,6 @@ output_ids = model.generate(**inputs, tokenizer_chunk_size=tokenizer_chunk_size)
 generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
 transcription = processor.batch_decode(generated_ids, extract_transcription=True)
 ```
-
-
 
 ### Chat template
 
@@ -285,7 +278,7 @@ print(transcription)
 
 ### Training
 
-VibeVoice ASR can be trained, the model outputs a loss
+VibeVoice ASR can be trained with the loss outputted by the model.
 
 
 ```python
@@ -339,7 +332,6 @@ loss = model(**inputs).loss
 print("Loss:", loss.item())
 loss.backward()
 ```
-
 
 ## VibeVoiceAsrEncoderConfig
 
