@@ -120,10 +120,10 @@ class VibeVoiceAsrEncoderConfig(VibeVoiceAcousticTokenizerConfig):
         del self.vae_std
 
     def upsampling_ratios(self):
-        raise NotImplementedError("VibeVoiceAsrEncoderConfig does not support upsampling_ratios.")
+        raise NotImplementedError("VibeVoiceAsrEncoderConfig does not need upsampling_ratios.")
 
     def decoder_depths(self):
-        raise NotImplementedError("VibeVoiceAsrEncoderConfig does not support decoder_depths.")
+        raise NotImplementedError("VibeVoiceAsrEncoderConfig does not need decoder_depths.")
 
 
 class VibeVoiceAsrConfig(PretrainedConfig):
@@ -341,7 +341,6 @@ class VibeVoiceAsrEncoderModel(VibeVoiceAcousticTokenizerModel):
 class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneration):
     def __init__(self, config: VibeVoiceAsrConfig):
         super().__init__(config)
-        self.vocab_size = config.text_config.vocab_size
         self.acoustic_tokenizer = AutoModel.from_config(config.acoustic_tokenizer_config)
         self.semantic_tokenizer = AutoModel.from_config(config.semantic_tokenizer_config)
         del self.audio_tower

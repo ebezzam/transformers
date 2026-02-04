@@ -44,7 +44,7 @@ class VibeVoiceAsrProcessorKwargs(ProcessingKwargs, total=False):
             "sampling_rate": 24000,
             "padding": True,
             "return_attention_mask": True,
-            "pad_to_multiple_of": 3200,  # acoustic_tokenizer.hop_length
+            "pad_to_multiple_of": 3200,  # tokenizer hop length
         },
     }
 
@@ -166,7 +166,6 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
             for i, num_tokens in enumerate(num_audio_tokens):
                 text[i] = re.sub(re.escape(self.audio_token), self.audio_token * num_tokens, text[i])
 
-        # Tokenize
         text_inputs = self.tokenizer(text, **text_kwargs)
         data.update(text_inputs)
 
@@ -267,7 +266,7 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
 
         Args:
             return_as_dicts (`bool`, *optional*, defaults to `False`):
-                Whether to reformat the each decoded output as a list of dicts for each speaker.
+                Whether to reformat each decoded output as a list of dicts for each speaker.
             extract_transcription (`bool`, *optional*, defaults to `False`):
                 Whether to extract only the transcription content from each decoded output, dropping the speaker tags
                 and timestamps.
@@ -308,7 +307,7 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
         return segments
 
     def _extract_content_from_dict(self, dict_output: list[dict] | str) -> str:
-        """Extract and concatenate 'Content' fields, handling both parsed and unparsed output."""
+        """Extract and concatenate 'Content' fields"""
         # If parsing failed, dict_output is the original string
         if isinstance(dict_output, str):
             return dict_output

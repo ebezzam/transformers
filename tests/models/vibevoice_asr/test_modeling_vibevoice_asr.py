@@ -240,46 +240,101 @@ class VibeVoiceAsrForConditionalGenerationIntegrationTest(unittest.TestCase):
         return [x["array"] for x in speech_samples]
 
     @slow
-    def test_integration_single(self):
+    def test_single(self):
         """
         reproducer: https://gist.github.com/ebezzam/e1200bcecdc29e87dadd9d8423ae7ecb#file-reproducer_vibevoice_asr-py
         """
 
         path = Path(__file__).parent.parent.parent / "fixtures/vibevoice_asr/expected_results_single.json"
         with open(path, "r", encoding="utf-8") as f:
-            raw = json.load(f)
-        exp_inp_ids = torch.tensor(raw["input_ids"])
-        exp_gen_ids = torch.tensor(raw["generated_ids"])
-        exp_txt = raw["transcriptions"]
+            expected_outputs = json.load(f)
 
         samples = self._load_datasamples(1)
+        conversation = [{"role": "user", "content": [{"type": "audio", "audio": samples[0]}]}]
+
+        model = VibeVoiceAsrForConditionalGeneration.from_pretrained(
+            self.checkpoint, device_map=torch_device, dtype=torch.bfloat16
+        )
+
+        inputs = self.processor.apply_chat_template(conversation, tokenize=True, return_dict=True).to(
+            model.device, dtype=model.dtype
+        )
+        torch.testing.assert_close(inputs["input_ids"].cpu(), torch.tensor(expected_outputs["input_ids"]))
+
+        output = model.generate(**inputs)
+        gen_ids = output[:, inputs["input_ids"].shape[1] :]
+        torch.testing.assert_close(gen_ids.cpu(), torch.tensor(expected_outputs["generated_ids"]))
+        txt = self.processor.batch_decode(gen_ids, skip_special_tokens=True)
+        self.assertListEqual(txt, expected_outputs["transcriptions"])
+
+    @slow
+    def test_batch(self):
+        """
+        reproducer: https://gist.github.com/ebezzam/e1200bcecdc29e87dadd9d8423ae7ecb#file-reproducer_vibevoice_asr_batch-py
+        """
+
+        path = Path(__file__).parent.parent.parent / "fixtures/vibevoice_asr/expected_results_batch.json"
+        with open(path, "r", encoding="utf-8") as f:
+            expected_outputs = json.load(f)
+
+        samples = self._load_datasamples(2)
+        conversation = [
+            [{"role": "user", "content": [{"type": "audio", "audio": samples[0]}]}],
+            [{"role": "user", "content": [{"type": "audio", "audio": samples[1]}]}],
+        ]
+
+        model = VibeVoiceAsrForConditionalGeneration.from_pretrained(
+            self.checkpoint, device_map=torch_device, dtype=torch.bfloat16
+        )
+        inputs = self.processor.apply_chat_template(conversation, tokenize=True, return_dict=True).to(
+            model.device, dtype=model.dtype
+        )
+
+        output = model.generate(**inputs)
+        gen_ids = output[:, inputs["input_ids"].shape[1] :]
+        for i, exp_gen in enumerate(expected_outputs["generated_ids"]):
+            actual_gen = gen_ids[i, : len(exp_gen)]
+            torch.testing.assert_close(actual_gen.cpu(), torch.tensor(exp_gen))
+        txt = self.processor.batch_decode(gen_ids, skip_special_tokens=True)
+        self.assertListEqual(txt, expected_outputs["transcriptions"])
+
+    @slow
+    def test_single_with_context(self):
+        """
+        reproducer: tests/models/vibevoice_asr/reproducer_vibevoice_asr_with_context.py
+        """
+
+        path = Path(__file__).parent.parent.parent / "fixtures/vibevoice_asr/expected_results_with_context.json"
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
 
         conversation = [
             {
                 "role": "user",
                 "content": [
                     {
+                        "type": "text",
+                        "text": "About VibeVoice",
+                    },
+                    {
                         "type": "audio",
-                        "audio": samples[0],
+                        "path": "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav",
                     },
                 ],
             }
         ]
 
         model = VibeVoiceAsrForConditionalGeneration.from_pretrained(
-            self.checkpoint, device_map=torch_device, torch_dtype=torch.bfloat16
-        ).eval()
-
-        batch = self.processor.apply_chat_template(conversation, tokenize=True, return_dict=True).to(
-            model.device, dtype=model.dtype
+            self.checkpoint, device_map=torch_device, dtype=torch.bfloat16
         )
 
-        torch.testing.assert_close(batch["input_ids"].cpu(), exp_inp_ids)
+        inputs = self.processor.apply_chat_template(conversation, tokenize=True, return_dict=True).to(
+            model.device, dtype=model.dtype
+        )
+        torch.testing.assert_close(inputs["input_ids"].cpu(), torch.tensor(raw["input_ids"]))
 
-        seq = model.generate(**batch, max_new_tokens=512)
-        inp_len = batch["input_ids"].shape[1]
-        gen_ids = seq[:, inp_len:] if seq.shape[1] >= inp_len else seq
-
-        torch.testing.assert_close(gen_ids.cpu(), exp_gen_ids)
+        output = model.generate(**inputs)
+        gen_ids = output[:, inputs["input_ids"].shape[1] :]
+        torch.testing.assert_close(gen_ids.cpu(), torch.tensor(raw["generated_ids"]))
         txt = self.processor.batch_decode(gen_ids, skip_special_tokens=True)
-        self.assertListEqual(txt, exp_txt)
+        self.assertListEqual(txt, raw["transcriptions"])
