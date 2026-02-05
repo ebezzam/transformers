@@ -28,7 +28,7 @@ rendered properly in your Markdown viewer.
 
 One key feature of VibeVoice is the use of two continuous audio tokenizers, one for extracting acoustic features and another for semantic features.
 
-A model checkpoint is available at [bezzam/VibeVoice-AcousticTokenizer](https://huggingface.co/bezzam/VibeVoice-AcousticTokenizer)
+A model checkpoint is available at [microsoft/VibeVoice-AcousticTokenizer](https://huggingface.co/microsoft/VibeVoice-AcousticTokenizer)
 
 This model was contributed by [Eric Bezzam](https://huggingface.co/bezzam).
 
@@ -50,7 +50,7 @@ from transformers import AutoFeatureExtractor, VibeVoiceAcousticTokenizerModel
 from transformers.audio_utils import load_audio_librosa
 
 
-model_id = "bezzam/VibeVoice-AcousticTokenizer"
+model_id = "microsoft/VibeVoice-AcousticTokenizer"
 
 # load model
 feature_extractor = AutoFeatureExtractor.from_pretrained(model_id)
@@ -100,7 +100,7 @@ from transformers import AutoFeatureExtractor, VibeVoiceAcousticTokenizerModel
 from transformers.audio_utils import load_audio_librosa
 
 
-model_id = "bezzam/VibeVoice-AcousticTokenizer"
+model_id = "microsoft/VibeVoice-AcousticTokenizer"
 
 # load model
 feature_extractor = AutoFeatureExtractor.from_pretrained(model_id)
