@@ -318,11 +318,23 @@ class VibeVoiceAsrEncoderModel(VibeVoiceAcousticTokenizerModel):
             Whether to use caching for convolution states.
         """
         if use_cache and padding_cache is None:
+            per_layer_padding = [self.encoder.stem.conv.causal_padding]
+            per_layer_in_channels = [self.encoder.stem.conv.conv.in_channels]
+            per_layer_padding.extend([block.mixer.causal_padding for block in self.encoder.stem.stage])
+            per_layer_in_channels.extend([block.mixer.conv.in_channels for block in self.encoder.stem.stage])
+            for layer in self.encoder.conv_layers:
+                per_layer_padding.append(layer.conv.causal_padding)
+                per_layer_in_channels.append(layer.conv.conv.in_channels)
+                per_layer_padding.extend([block.mixer.causal_padding for block in layer.stage])
+                per_layer_in_channels.extend([block.mixer.conv.in_channels for block in layer.stage])
+            per_layer_padding.append(self.encoder.head.causal_padding)
+            per_layer_in_channels.append(self.encoder.head.conv.in_channels)
+
             padding_cache = VibeVoiceAsrConv1dPaddingCache(
-                num_layers=self.encoder.num_conv_layers,
-                per_layer_padding=self.encoder.per_conv_layer_padding,
-                per_layer_padding_mode=self.encoder.per_conv_layer_padding_mode,
-                per_layer_in_channels=self.encoder.per_conv_layer_in_channels,
+                num_layers=len(per_layer_padding),
+                per_layer_padding=per_layer_padding,
+                per_layer_padding_mode=["constant"] * len(per_layer_padding),
+                per_layer_in_channels=per_layer_in_channels,
             )
         latents = self.encoder(input_values, padding_cache=padding_cache)
 
