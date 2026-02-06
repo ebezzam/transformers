@@ -34,17 +34,17 @@ logger = logging.get_logger(__name__)
 class VibeVoiceAsrProcessorKwargs(ProcessingKwargs, total=False):
     _defaults = {
         "text_kwargs": {
-            "padding": True,
             "padding_side": "left",
             "add_special_tokens": False,
-            "return_attention_mask": True,
             "return_tensors": "pt",
         },
         "audio_kwargs": {
             "sampling_rate": 24000,
+            "pad_to_multiple_of": 3200,  # tokenizer hop length
+        },
+        "common_kwargs": {
             "padding": True,
             "return_attention_mask": True,
-            "pad_to_multiple_of": 3200,  # tokenizer hop length
         },
     }
 
