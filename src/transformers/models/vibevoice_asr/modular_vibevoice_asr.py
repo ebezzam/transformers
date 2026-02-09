@@ -17,9 +17,11 @@ import numpy as np
 import torch
 from torch import nn
 
+from ...cache_utils import Cache
 from ...configuration_utils import PretrainedConfig
-from ...modeling_outputs import CausalLMOutputWithPast
-from ...utils import auto_docstring, can_return_tuple, logging
+from ...modeling_outputs import BaseModelOutputWithPooling, CausalLMOutputWithPast
+from ...processing_utils import Unpack
+from ...utils import TransformersKwargs, auto_docstring, can_return_tuple, logging
 from ..audioflamingo3.modeling_audioflamingo3 import AudioFlamingo3ForConditionalGeneration
 from ..auto import CONFIG_MAPPING, AutoConfig, AutoModel
 from ..mimi.modeling_mimi import MimiConv1dPaddingCache
@@ -281,9 +283,8 @@ class VibeVoiceAsrPreTrainedModel(VibeVoiceAcousticTokenizerPreTrainedModel):
     input_modalities = ("audio", "text")
     supports_gradient_checkpointing = True
     _skip_keys_device_placement = "past_key_values"
-    _supports_cache_class = True
+    _supports_flash_attn = True
     _supports_sdpa = True
-    _supports_attention_backend = True
 
 
 class VibeVoiceAsrEncoderOutput(VibeVoiceAcousticTokenizerEncoderOutput):
@@ -297,6 +298,8 @@ class VibeVoiceAsrEncoderOutput(VibeVoiceAcousticTokenizerEncoderOutput):
 )
 class VibeVoiceAsrEncoderModel(VibeVoiceAcousticTokenizerModel):
     config: VibeVoiceAsrEncoderConfig
+    main_input_name = "input_values"
+    input_modalities = "audio"
 
     def __init__(self, config):
         super().__init__(config)
@@ -363,6 +366,7 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
         input_values: torch.FloatTensor,
         padding_mask: torch.BoolTensor | None = None,
         tokenizer_chunk_size: int | None = None,
+        **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | VibeVoiceAsrEncoderOutput:
         r"""
         input_values (`torch.FloatTensor` of shape `(batch_size, num_samples)`):
@@ -421,10 +425,12 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
             # Adjust padding mask according to tokenizer compression
             hop_length = np.prod(self.acoustic_tokenizer.config.downsampling_ratios)
             num_audio_tokens = torch.ceil(padding_mask.sum(dim=-1) / hop_length).to(torch.int64)
-            padding_mask = torch.arange(max(num_audio_tokens)) < num_audio_tokens[:, None].cpu()
+            padding_mask = torch.arange(
+                num_audio_tokens.max().item(), device=combined_features.device
+            ) < num_audio_tokens[:, None].to(combined_features.device)
             combined_features = combined_features[padding_mask]
 
-        return VibeVoiceAsrEncoderOutput(latents=combined_features)
+        return BaseModelOutputWithPooling(last_hidden_state=acoustic_latents, pooler_output=combined_features)
 
     @can_return_tuple
     @auto_docstring
@@ -432,11 +438,12 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
         self,
         input_ids: torch.LongTensor | None = None,
         attention_mask: torch.Tensor | None = None,
+        past_key_values: Cache | None = None,
         inputs_embeds: torch.FloatTensor | None = None,
         input_values: torch.FloatTensor | None = None,
         padding_mask: torch.BoolTensor | None = None,
         tokenizer_chunk_size: int | None = None,
-        **kwargs,
+        **kwargs: Unpack[TransformersKwargs],
     ) -> CausalLMOutputWithPast:
         r"""
         padding_mask (`torch.BoolTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -467,7 +474,7 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
         if input_values is not None and input_ids is not None:
             audio_embeds = self.get_audio_features(
                 input_values=input_values, padding_mask=padding_mask, tokenizer_chunk_size=tokenizer_chunk_size
-            ).latents
+            ).pooler_output
 
             # replace text-audio token placeholders with audio embeddings
             audio_token_mask = (input_ids == self.config.audio_token_id).unsqueeze(-1)
@@ -475,7 +482,9 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
                 audio_token_mask.to(inputs_embeds.device), audio_embeds.to(inputs_embeds.device)
             )
 
-        return self.language_model(inputs_embeds=inputs_embeds, attention_mask=attention_mask, **kwargs)
+        return self.language_model(
+            inputs_embeds=inputs_embeds, attention_mask=attention_mask, past_key_values=past_key_values, **kwargs
+        )
 
     def prepare_inputs_for_generation(self, *args, **kwargs):
         input_values = kwargs.pop("input_values", None)

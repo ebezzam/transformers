@@ -1,4 +1,4 @@
-# Copyright 2026 Microsoft and the HuggingFace Inc. team. All rights reserved.
+# Copyright 2026 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,104 +11,106 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Testing suite for the VibeVoice ASR processor."""
 
+import shutil
+import tempfile
 import unittest
 
-import numpy as np
+from parameterized import parameterized
 
-from transformers import AutoTokenizer, VibeVoiceASRProcessor
+from transformers import (
+    AutoProcessor,
+    AutoTokenizer,
+    VibeVoiceAcousticTokenizerFeatureExtractor,
+    VibeVoiceAsrProcessor,
+)
 from transformers.testing_utils import require_torch
 
+from ...test_processing_common import ProcessorTesterMixin
 
-@require_torch
-class VibeVoiceASRProcessorTest(unittest.TestCase):
-    def setUp(self):
-        # Use a simple tokenizer for testing
-        self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2-0.5B")
-        # Add audio token if not present
-        if "<audio>" not in self.tokenizer.get_vocab():
-            self.tokenizer.add_special_tokens({"additional_special_tokens": ["<audio>"]})
 
-        self.processor = VibeVoiceASRProcessor(
-            audio_processor=None,
-            tokenizer=self.tokenizer,
-            audio_token="<audio>",
+class VibeVoiceAsrProcessorTest(ProcessorTesterMixin, unittest.TestCase):
+    processor_class = VibeVoiceAsrProcessor
+
+    @classmethod
+    @require_torch
+    def setUpClass(cls):
+        cls.checkpoint = "bezzam/VibeVoice-ASR-7B"
+        cls.tmpdirname = tempfile.mkdtemp()
+
+        processor = VibeVoiceAsrProcessor.from_pretrained(cls.checkpoint)
+        processor.save_pretrained(cls.tmpdirname)
+
+    @require_torch
+    def get_tokenizer(self, **kwargs):
+        return AutoProcessor.from_pretrained(self.tmpdirname, **kwargs).tokenizer
+
+    @require_torch
+    def get_feature_extractor(self, **kwargs):
+        return AutoProcessor.from_pretrained(self.tmpdirname, **kwargs).feature_extractor
+
+    @require_torch
+    def get_processor(self, **kwargs):
+        return AutoProcessor.from_pretrained(self.tmpdirname, **kwargs)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmpdirname, ignore_errors=True)
+
+    @require_torch
+    def test_can_load_various_tokenizers(self):
+        processor = VibeVoiceAsrProcessor.from_pretrained(self.checkpoint)
+        tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
+        self.assertEqual(processor.tokenizer.__class__, tokenizer.__class__)
+
+    @require_torch
+    def test_save_load_pretrained_default(self):
+        tokenizer = AutoTokenizer.from_pretrained(self.checkpoint)
+        processor = VibeVoiceAsrProcessor.from_pretrained(self.checkpoint)
+        feature_extractor = processor.feature_extractor
+
+        processor = VibeVoiceAsrProcessor(tokenizer=tokenizer, feature_extractor=feature_extractor)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processor.save_pretrained(tmpdir)
+            reloaded = VibeVoiceAsrProcessor.from_pretrained(tmpdir)
+
+        self.assertEqual(reloaded.tokenizer.get_vocab(), tokenizer.get_vocab())
+        self.assertEqual(reloaded.feature_extractor.to_json_string(), feature_extractor.to_json_string())
+        self.assertIsInstance(reloaded.feature_extractor, VibeVoiceAcousticTokenizerFeatureExtractor)
+
+    @require_torch
+    def test_apply_transcription_request_single(self):
+        processor = AutoProcessor.from_pretrained(self.checkpoint)
+
+        audio_url = "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav"
+        helper_outputs = processor.apply_transcription_request(audio=audio_url, prompt="About VibeVoice")
+
+        conversation = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "About VibeVoice"},
+                    {
+                        "type": "audio",
+                        "path": "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav",
+                    },
+                ],
+            }
+        ]
+        manual_outputs = processor.apply_chat_template(
+            conversation,
+            tokenize=True,
+            return_dict=True,
         )
 
-    def test_processor_tokenizer_only(self):
-        """Test that processor works with text-only inputs."""
-        text = "Hello, how are you?"
-        encoded = self.processor(text=text, audio=None)
+        for key in ("input_ids", "attention_mask", "input_values", "padding_mask"):
+            self.assertIn(key, helper_outputs)
+            self.assertTrue(helper_outputs[key].equal(manual_outputs[key]))
 
-        self.assertIn("input_ids", encoded)
-        self.assertIn("attention_mask", encoded)
-        self.assertNotIn("speech_tensors", encoded)
+    @parameterized.expand([(1, "np"), (1, "pt"), (2, "np"), (2, "pt")])
+    def test_apply_chat_template_audio(self, batch_size: int, return_tensors: str):
+        self.skipTest("VibeVoiceAsrProcessor does not support chat templates with text-only inputs.")
 
-    def test_processor_with_audio(self):
-        """Test that processor works with text and audio inputs."""
-        text = "<audio>Transcribe this audio."
-        # Create dummy audio (1 second at 24kHz)
-        audio = np.random.randn(24000).astype(np.float32)
-
-        encoded = self.processor(text=text, audio=audio)
-
-        self.assertIn("input_ids", encoded)
-        self.assertIn("attention_mask", encoded)
-        self.assertIn("speech_tensors", encoded)
-        self.assertIn("acoustic_input_mask", encoded)
-
-        # Check that audio token was expanded
-        audio_token_id = self.processor.audio_token_id
-        num_audio_tokens = (encoded["input_ids"] == audio_token_id).sum().item()
-        self.assertGreater(num_audio_tokens, 0)
-
-    def test_processor_batch(self):
-        """Test that processor works with batched inputs."""
-        texts = ["<audio>First audio.", "<audio>Second audio."]
-        # Create dummy audios
-        audios = [
-            np.random.randn(24000).astype(np.float32),
-            np.random.randn(48000).astype(np.float32),  # Different length
-        ]
-
-        encoded = self.processor(text=texts, audio=audios)
-
-        self.assertIn("input_ids", encoded)
-        self.assertIn("attention_mask", encoded)
-        self.assertIn("speech_tensors", encoded)
-        self.assertEqual(len(encoded["speech_tensors"]), 2)
-
-    def test_apply_transcription_request(self):
-        """Test the apply_transcription_request convenience method."""
-        audio = np.random.randn(24000).astype(np.float32)
-
-        encoded = self.processor.apply_transcription_request(audio=audio)
-
-        self.assertIn("input_ids", encoded)
-        self.assertIn("speech_tensors", encoded)
-
-        # Check that default prompt was added
-        decoded_text = self.processor.tokenizer.decode(encoded["input_ids"][0], skip_special_tokens=False)
-        self.assertIn(self.processor.default_transcription_prompt, decoded_text)
-
-    def test_audio_token_expansion(self):
-        """Test that audio tokens are correctly expanded based on audio length."""
-        text = "<audio>Test"
-        audio_short = np.random.randn(24000).astype(np.float32)  # 1 second
-        audio_long = np.random.randn(240000).astype(np.float32)  # 10 seconds
-
-        encoded_short = self.processor(text=text, audio=audio_short)
-        encoded_long = self.processor(text=text, audio=audio_long)
-
-        # Count audio tokens
-        audio_token_id = self.processor.audio_token_id
-        num_tokens_short = (encoded_short["input_ids"] == audio_token_id).sum().item()
-        num_tokens_long = (encoded_long["input_ids"] == audio_token_id).sum().item()
-
-        # Longer audio should have more tokens
-        self.assertGreater(num_tokens_long, num_tokens_short)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_apply_chat_template_assistant_mask(self):
+        self.skipTest("VibeVoiceAsrProcessor does not support chat templates with text-only inputs.")

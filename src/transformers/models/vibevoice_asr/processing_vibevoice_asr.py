@@ -34,6 +34,7 @@ logger = logging.get_logger(__name__)
 class VibeVoiceAsrProcessorKwargs(ProcessingKwargs, total=False):
     _defaults = {
         "text_kwargs": {
+            "padding": True,
             "padding_side": "left",
             "add_special_tokens": False,
             "return_tensors": "pt",
@@ -43,7 +44,6 @@ class VibeVoiceAsrProcessorKwargs(ProcessingKwargs, total=False):
             "pad_to_multiple_of": 3200,  # tokenizer hop length
         },
         "common_kwargs": {
-            "padding": True,
             "return_attention_mask": True,
         },
     }
@@ -106,7 +106,7 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
     def __call__(
         self,
         text: TextInput | list[TextInput],
-        audio: AudioInput | None = None,
+        audio: AudioInput,
         output_labels: bool | None = False,
         **kwargs: Unpack[VibeVoiceAsrProcessorKwargs],
     ) -> BatchFeature:
@@ -120,7 +120,7 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
         Args:
             text (`str`, `List[str]`):
                 The input text(s) to process, typically prepared by apply_chat_template with audio token placeholders.
-            audio (`List[Union[str, np.ndarray]]`, *optional*):
+            audio (`List[Union[str, np.ndarray]]`):
                 Audio samples for transcription. Should match the number of audio token placeholders in text.
             output_labels (bool, *optional*, default=False):
                 Whether to return labels for training.
@@ -148,23 +148,21 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
         elif not isinstance(text, (list, tuple)):
             raise ValueError("text input must be a string or list of strings")
 
-        if audio is not None:
-            audio = make_list_of_audio(audio)
-            if len(text) != len(audio):
-                raise ValueError(f"Got {len(text)} text but {len(audio)} audios; they must match 1:1.")
+        audio = make_list_of_audio(audio)
+        if len(text) != len(audio):
+            raise ValueError(f"Got {len(text)} text but {len(audio)} audios; they must match 1:1.")
+        data = self.feature_extractor(audio, **audio_kwargs)
 
-            data = self.feature_extractor(audio, **audio_kwargs)
+        # Replace audio duration placeholders in text
+        audio_lengths = data["padding_mask"].sum(dim=-1).cpu().numpy()
+        audio_durations = audio_lengths / self.feature_extractor.sampling_rate
+        for i in range(len(text)):
+            text[i] = text[i].replace(self.audio_duration_token, f"{audio_durations[i]:.2f}")
 
-            # Replace audio duration placeholders in text
-            audio_lengths = data["padding_mask"].sum(dim=-1).cpu().numpy()
-            audio_durations = audio_lengths / self.feature_extractor.sampling_rate
-            for i in range(len(text)):
-                text[i] = text[i].replace(self.audio_duration_token, f"{audio_durations[i]:.2f}")
-
-            # Expand audio tokens in text
-            num_audio_tokens = np.ceil(audio_lengths / audio_kwargs["pad_to_multiple_of"]).astype(int).tolist()
-            for i, num_tokens in enumerate(num_audio_tokens):
-                text[i] = re.sub(re.escape(self.audio_token), self.audio_token * num_tokens, text[i])
+        # Expand audio tokens in text
+        num_audio_tokens = np.ceil(audio_lengths / audio_kwargs["pad_to_multiple_of"]).astype(int).tolist()
+        for i, num_tokens in enumerate(num_audio_tokens):
+            text[i] = re.sub(re.escape(self.audio_token), self.audio_token * num_tokens, text[i])
 
         text_inputs = self.tokenizer(text, **text_kwargs)
         data.update(text_inputs)
