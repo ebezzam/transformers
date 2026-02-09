@@ -149,6 +149,23 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
         with open(config_path, "r") as f:
             original_config = json.load(f)
 
+        config_keys_to_remove = [
+            "decoder_depths",
+            "decoder_n_filters",
+            "decoder_ratios",
+            "std_dist_type",
+            "fix_std",
+            "pad_mode",
+            "conv_bias",
+            "causal",
+            "mixer_layer",
+            "layernorm",
+            "disable_last_norm",
+            "conv_norm",
+            "corpus_normalize",
+            "layernorm_elementwise_affine",
+        ]
+
         # Prepare acoustic tokenizer config
         acoustic_config_dict = original_config.get("acoustic_tokenizer_config", {}).copy()
         if "encoder_depths" in acoustic_config_dict and isinstance(acoustic_config_dict["encoder_depths"], str):
@@ -166,23 +183,8 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
         if "fix_std" in acoustic_config_dict:
             # NOTE passed to main model config
             acoustic_vae_std = acoustic_config_dict.pop("fix_std") / 0.8
-        for key in [
-            "decoder_depths",
-            "decoder_n_filters",
-            "decoder_ratios",
-            "std_dist_type",
-            "pad_mode",
-            "conv_bias",
-            "causal",
-            "mixer_layer",
-            "layernorm",
-            "disable_last_norm",
-            "conv_norm",
-            "corpus_normalize",
-            "layernorm_elementwise_affine",
-        ]:
+        for key in config_keys_to_remove:
             acoustic_config_dict.pop(key, None)
-
         acoustic_config = VibeVoiceAsrEncoderConfig(**acoustic_config_dict)
 
         # Prepare semantic tokenizer config
@@ -199,24 +201,8 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
             semantic_config_dict["depths"] = semantic_config_dict.pop("encoder_depths")
         if "vae_dim" in semantic_config_dict:
             semantic_config_dict["hidden_size"] = semantic_config_dict.pop("vae_dim")
-        for key in [
-            "decoder_depths",
-            "decoder_n_filters",
-            "decoder_ratios",
-            "std_dist_type",
-            "fix_std",
-            "pad_mode",
-            "conv_bias",
-            "causal",
-            "mixer_layer",
-            "layernorm",
-            "disable_last_norm",
-            "conv_norm",
-            "corpus_normalize",
-            "layernorm_elementwise_affine",
-        ]:
+        for key in config_keys_to_remove:
             semantic_config_dict.pop(key, None)
-
         semantic_config = VibeVoiceAsrEncoderConfig(**semantic_config_dict)
 
         # Create main config
@@ -262,14 +248,12 @@ This is a <|AUDIO_DURATION|> seconds audio, please transcribe it with these keys
 
     processor = VibeVoiceAsrProcessor(
         feature_extractor=VibeVoiceAcousticTokenizerFeatureExtractor(),
-        # https://github.com/microsoft/VibeVoice/blob/b2aee8015c3c2d97c388346ebcfffdaf2f427f7d/demo/vibevoice_asr_inference_from_file.py#L49
+        # Original: https://github.com/microsoft/VibeVoice/blob/b2aee8015c3c2d97c388346ebcfffdaf2f427f7d/demo/vibevoice_asr_inference_from_file.py#L49
         tokenizer=Qwen2TokenizerFast.from_pretrained("Qwen/Qwen2.5-7B"),
         chat_template=chat_template,
     )
-
     processor.save_pretrained(str(output_dir))
     logger.info(f"Saved processor to {output_dir}")
-
     return processor
 
 
