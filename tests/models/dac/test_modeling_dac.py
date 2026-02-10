@@ -307,7 +307,7 @@ Integration tests for DAC.
 Code for reproducing expected outputs can be found here:
 - test_integration: https://gist.github.com/ebezzam/bb315efa7a416db6336a6b2a2d424ffa#file-test_dac-py
 - test_batch: https://gist.github.com/ebezzam/bb315efa7a416db6336a6b2a2d424ffa#file-test_dac_batch-py
-NOTE (ebezzam): had to run reproducers from CI for expected outputs to match
+NOTE (ebezzam): had to run reproducers from CI for expected outputs to match, cf PR which modified CI torch settings: https://github.com/huggingface/transformers/pull/39885
 
 See https://github.com/huggingface/transformers/pull/39313 for reason behind large tolerance between for encoder
 and decoder outputs (1e-3). In summary, original model uses weight normalization, while Transformers does not. This
