@@ -126,6 +126,10 @@ class VibeVoiceAsrEncoderConfig(VibeVoiceAcousticTokenizerConfig):
     def decoder_depths(self):
         raise NotImplementedError("VibeVoiceAsrEncoderConfig does not need decoder_depths.")
 
+    @property
+    def hop_length(self):
+        return int(np.prod(self.downsampling_ratios))
+
 
 class VibeVoiceAsrConfig(PretrainedConfig):
     r"""
@@ -381,11 +385,13 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
         if tokenizer_chunk_size is None:
             tokenizer_chunk_size = self.config.tokenizer_chunk_size
         else:
-            hop_length = np.prod(self.acoustic_tokenizer.config.downsampling_ratios)
-            if tokenizer_chunk_size % hop_length != 0:
-                tokenizer_chunk_size = int((tokenizer_chunk_size // hop_length) * hop_length)
+            if tokenizer_chunk_size % self.config.acoustic_tokenizer_config.hop_length != 0:
+                tokenizer_chunk_size = int(
+                    (tokenizer_chunk_size // self.config.acoustic_tokenizer_config.hop_length)
+                    * self.config.acoustic_tokenizer_config.hop_length
+                )
                 logger.warning(
-                    f"`tokenizer_chunk_size` has been adjusted to {tokenizer_chunk_size} to be a multiple of hop length ({hop_length})."
+                    f"`tokenizer_chunk_size` has been adjusted to {tokenizer_chunk_size} to be a multiple of hop length ({self.config.acoustic_tokenizer_config.hop_length})."
                 )
 
         with torch.no_grad():
@@ -423,11 +429,12 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
         combined_features = self.multi_modal_projector(acoustic_latents, semantic_latents)
         if padding_mask is not None:
             # Adjust padding mask according to tokenizer compression
-            hop_length = np.prod(self.acoustic_tokenizer.config.downsampling_ratios)
-            num_audio_tokens = torch.ceil(padding_mask.sum(dim=-1) / hop_length).to(torch.int64)
-            padding_mask = torch.arange(
-                num_audio_tokens.max().item(), device=combined_features.device
-            ) < num_audio_tokens[:, None].to(combined_features.device)
+            num_audio_tokens = torch.ceil(
+                padding_mask.sum(dim=-1) / self.config.acoustic_tokenizer_config.hop_length
+            ).to(torch.int64)
+            padding_mask = torch.arange(num_audio_tokens.max(), device=combined_features.device) < num_audio_tokens[
+                :, None
+            ].to(combined_features.device)
             combined_features = combined_features[padding_mask]
 
         return BaseModelOutputWithPooling(last_hidden_state=acoustic_latents, pooler_output=combined_features)
@@ -476,7 +483,7 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
                 input_values=input_values, padding_mask=padding_mask, tokenizer_chunk_size=tokenizer_chunk_size
             ).pooler_output
 
-            # replace text-audio token placeholders with audio embeddings
+            # Replace text-audio token placeholders with audio embeddings
             audio_token_mask = (input_ids == self.config.audio_token_id).unsqueeze(-1)
             inputs_embeds = inputs_embeds.masked_scatter(
                 audio_token_mask.to(inputs_embeds.device), audio_embeds.to(inputs_embeds.device)

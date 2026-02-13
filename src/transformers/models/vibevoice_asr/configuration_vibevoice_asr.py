@@ -19,6 +19,8 @@
 # limitations under the License.
 
 
+import numpy as np
+
 from ...configuration_utils import PretrainedConfig
 from ..auto import CONFIG_MAPPING, AutoConfig
 
@@ -101,6 +103,10 @@ class VibeVoiceAsrEncoderConfig(PretrainedConfig):
         self.num_filters = num_filters
         self.downsampling_ratios = downsampling_ratios
         self.depths = depths
+
+    @property
+    def hop_length(self):
+        return int(np.prod(self.downsampling_ratios))
 
 
 class VibeVoiceAsrConfig(PretrainedConfig):

@@ -31,6 +31,7 @@ from transformers.testing_utils import (
     slow,
     torch_device,
 )
+from transformers.trainer_utils import set_seed
 
 from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
@@ -298,6 +299,7 @@ class VibeVoiceAsrForConditionalGenerationIntegrationTest(unittest.TestCase):
         """
         reproducer: https://gist.github.com/ebezzam/e1200bcecdc29e87dadd9d8423ae7ecb#file-reproducer_vibevoice_asr-py
         """
+        set_seed(42)
 
         path = Path(__file__).parent.parent.parent / "fixtures/vibevoice_asr/expected_results_single.json"
         with open(path, "r", encoding="utf-8") as f:
@@ -326,6 +328,7 @@ class VibeVoiceAsrForConditionalGenerationIntegrationTest(unittest.TestCase):
         """
         reproducer: https://gist.github.com/ebezzam/e1200bcecdc29e87dadd9d8423ae7ecb#file-reproducer_vibevoice_asr_batch-py
         """
+        set_seed(42)
 
         path = Path(__file__).parent.parent.parent / "fixtures/vibevoice_asr/expected_results_batch.json"
         with open(path, "r", encoding="utf-8") as f:
@@ -357,6 +360,7 @@ class VibeVoiceAsrForConditionalGenerationIntegrationTest(unittest.TestCase):
         """
         reproducer: tests/models/vibevoice_asr/reproducer_vibevoice_asr_with_context.py
         """
+        set_seed(42)
 
         path = Path(__file__).parent.parent.parent / "fixtures/vibevoice_asr/expected_results_with_context.json"
         with open(path, "r", encoding="utf-8") as f:
