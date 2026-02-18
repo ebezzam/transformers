@@ -13,7 +13,6 @@
 # limitations under the License.
 
 
-import numpy as np
 import torch
 from torch import nn
 
@@ -27,108 +26,10 @@ from ..auto import CONFIG_MAPPING, AutoConfig, AutoModel
 from ..mimi.modeling_mimi import MimiConv1dPaddingCache
 from ..qwen2.modeling_qwen2 import Qwen2RMSNorm
 from ..vibevoice_acoustic_tokenizer.configuration_vibevoice_acoustic_tokenizer import VibeVoiceAcousticTokenizerConfig
-from ..vibevoice_acoustic_tokenizer.modeling_vibevoice_acoustic_tokenizer import (
-    VibeVoiceAcousticTokenizerEncoderOutput,
-    VibeVoiceAcousticTokenizerModel,
-    VibeVoiceAcousticTokenizerPreTrainedModel,
-)
+from ..vibevoice_acoustic_tokenizer.modeling_vibevoice_acoustic_tokenizer import VibeVoiceAcousticTokenizerPreTrainedModel
 
 
 logger = logging.get_logger(__name__)
-
-
-class VibeVoiceAsrEncoderConfig(VibeVoiceAcousticTokenizerConfig):
-    r"""
-    This is the configuration class to store the configuration of a [`VibeVoiceAsrEncoderModel`]. It is used to
-    instantiate a VibeVoice audio encoder according to the specified arguments, defining the model architecture.
-    Instantiating a configuration with the defaults will yield a similar configuration to that of the acoustic
-    tokenizer encoder of the VibeVoice-ASR architecture.
-
-    e.g. [microsoft/VibeVoice-ASR](https://huggingface.co/microsoft/VibeVoice-ASR)
-
-    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
-    documentation from [`PreTrainedConfig`] for more information.
-
-    Args:
-        channels (`int`, *optional*, defaults to 1):
-            Number of input channels.
-        hidden_size (`int`, *optional*, defaults to 64):
-            Dimensionality of latent representations.
-        kernel_size (`int`, *optional*, defaults to 7):
-            Kernel size for convolutional layers.
-        rms_norm_eps (`float`, *optional*, defaults to 1e-05):
-            Epsilon value for RMSNorm layers.
-        layer_scale_init_value (`float`, *optional*, defaults to 1e-06):
-            Initial value for layer scaling.
-        initializer_range (`float`, *optional*, defaults to 0.01):
-            Standard deviation for weight initialization.
-        num_filters (`int`, *optional*, defaults to 32):
-            Number of filters in initial convolutional layer, and doubles after each downsampling.
-        downsampling_ratios (`List[int]`, *optional*, defaults to `[2, 2, 4, 5, 5, 8]`):
-            Downsampling ratios for each layer.
-        depths (`List[int]`, *optional*, defaults to `[3, 3, 3, 3, 3, 3, 8]`):
-            Number of ConvNeXt blocks at each stage.
-        hidden_act (`str`, *optional*, defaults to `"gelu"`):
-            Activation function to use.
-        ffn_expansion (`int`, *optional*, defaults to 4):
-            Expansion factor for feed-forward networks.
-
-    ```python
-    >>> from transformers import VibeVoiceAsrEncoderModel, VibeVoiceAsrEncoderConfig
-
-    >>> # Initializing a VibeVoice ASR Encoder configuration
-    >>> configuration = VibeVoiceAsrEncoderConfig()
-
-    >>> # Initializing a model (with random weights)
-    >>> model = VibeVoiceAsrEncoderModel(configuration)
-
-    >>> # Accessing the model configuration
-    >>> configuration = model.config
-    ```"""
-
-    model_type = "vibevoice_asr_encoder"
-
-    def __init__(
-        self,
-        channels=1,
-        hidden_size=64,
-        kernel_size=7,
-        rms_norm_eps=1e-5,
-        layer_scale_init_value=1e-6,
-        initializer_range=1e-2,
-        num_filters=32,
-        downsampling_ratios=[2, 2, 4, 5, 5, 8],
-        depths=[3, 3, 3, 3, 3, 3, 8],
-        hidden_act="gelu",
-        ffn_expansion=4,
-        **kwargs,
-    ):
-        super().__init__(
-            channels=channels,
-            hidden_size=hidden_size,
-            kernel_size=kernel_size,
-            rms_norm_eps=rms_norm_eps,
-            layer_scale_init_value=layer_scale_init_value,
-            initializer_range=initializer_range,
-            num_filters=num_filters,
-            downsampling_ratios=downsampling_ratios,
-            depths=depths,
-            hidden_act=hidden_act,
-            ffn_expansion=ffn_expansion,
-            **kwargs,
-        )
-
-        del self.vae_std
-
-    def upsampling_ratios(self):
-        raise NotImplementedError("VibeVoiceAsrEncoderConfig does not need upsampling_ratios.")
-
-    def decoder_depths(self):
-        raise NotImplementedError("VibeVoiceAsrEncoderConfig does not need decoder_depths.")
-
-    @property
-    def hop_length(self):
-        return int(np.prod(self.downsampling_ratios))
 
 
 class VibeVoiceAsrConfig(PretrainedConfig):
@@ -205,24 +106,24 @@ class VibeVoiceAsrConfig(PretrainedConfig):
     ):
         if isinstance(acoustic_tokenizer_config, dict):
             acoustic_tokenizer_config["model_type"] = acoustic_tokenizer_config.get(
-                "model_type", "vibevoice_asr_encoder"
+                "model_type", "vibevoice_acoustic_tokenizer_encoder"
             )
             acoustic_tokenizer_config = CONFIG_MAPPING[acoustic_tokenizer_config["model_type"]](
                 **acoustic_tokenizer_config
             )
         elif acoustic_tokenizer_config is None:
-            acoustic_tokenizer_config = CONFIG_MAPPING["vibevoice_asr_encoder"]()
+            acoustic_tokenizer_config = CONFIG_MAPPING["vibevoice_acoustic_tokenizer_encoder"]()
         self.acoustic_tokenizer_config = acoustic_tokenizer_config
 
         if isinstance(semantic_tokenizer_config, dict):
             semantic_tokenizer_config["model_type"] = semantic_tokenizer_config.get(
-                "model_type", "vibevoice_asr_encoder"
+                "model_type", "vibevoice_acoustic_tokenizer_encoder"
             )
             semantic_tokenizer_config = CONFIG_MAPPING[semantic_tokenizer_config["model_type"]](
                 **semantic_tokenizer_config
             )
         elif semantic_tokenizer_config is None:
-            semantic_tokenizer_config = CONFIG_MAPPING["vibevoice_asr_encoder"](hidden_size=128)
+            semantic_tokenizer_config = CONFIG_MAPPING["vibevoice_acoustic_tokenizer_encoder"](hidden_size=128)
         self.semantic_tokenizer_config = semantic_tokenizer_config
 
         if isinstance(text_config, dict):
@@ -291,66 +192,6 @@ class VibeVoiceAsrPreTrainedModel(VibeVoiceAcousticTokenizerPreTrainedModel):
     _supports_sdpa = True
 
 
-class VibeVoiceAsrEncoderOutput(VibeVoiceAcousticTokenizerEncoderOutput):
-    pass
-
-
-@auto_docstring(
-    custom_intro="""
-    Tokenizer which only encodes audio into latent representations.
-    """
-)
-class VibeVoiceAsrEncoderModel(VibeVoiceAcousticTokenizerModel):
-    config: VibeVoiceAsrEncoderConfig
-    main_input_name = "input_values"
-    input_modalities = "audio"
-
-    def __init__(self, config):
-        super().__init__(config)
-        del self.decoder
-
-    def encode(self, input_values, padding_cache=None, use_cache=None, sample=True):
-        raise NotImplementedError("Encode method is not implemented.")
-
-    def decode(self, latents, padding_cache=None, use_cache=False):
-        raise NotImplementedError("Decode method is not implemented.")
-
-    def forward(self, input_values, padding_cache=None, use_cache=None, **kwargs):
-        r"""
-        input_values (`torch.FloatTensor` of shape `(batch_size, channels, sequence_length)`):
-            Input audio waveform to be encoded into latent representations.
-        padding_cache (`VibeVoiceAsrConv1dPaddingCache`, *optional*):
-            Cache object for streaming mode to maintain convolution states across layers.
-        use_cache (`bool`, *optional*):
-            Whether to use caching for convolution states.
-        """
-        if use_cache and padding_cache is None:
-            per_layer_padding = [self.encoder.stem.conv.causal_padding]
-            per_layer_in_channels = [self.encoder.stem.conv.conv.in_channels]
-            per_layer_padding.extend([block.mixer.causal_padding for block in self.encoder.stem.stage])
-            per_layer_in_channels.extend([block.mixer.conv.in_channels for block in self.encoder.stem.stage])
-            for layer in self.encoder.conv_layers:
-                per_layer_padding.append(layer.conv.causal_padding)
-                per_layer_in_channels.append(layer.conv.conv.in_channels)
-                per_layer_padding.extend([block.mixer.causal_padding for block in layer.stage])
-                per_layer_in_channels.extend([block.mixer.conv.in_channels for block in layer.stage])
-            per_layer_padding.append(self.encoder.head.causal_padding)
-            per_layer_in_channels.append(self.encoder.head.conv.in_channels)
-
-            padding_cache = VibeVoiceAsrConv1dPaddingCache(
-                num_layers=len(per_layer_padding),
-                per_layer_padding=per_layer_padding,
-                per_layer_padding_mode=["constant"] * len(per_layer_padding),
-                per_layer_in_channels=per_layer_in_channels,
-            )
-        latents = self.encoder(input_values, padding_cache=padding_cache)
-
-        return VibeVoiceAsrEncoderOutput(
-            latents=latents,
-            padding_cache=padding_cache if use_cache else None,
-        )
-
-
 @auto_docstring(
     custom_intro="""
     The VibeVoice ASR model with pre-trained acoustic tokenizers and a language model.
@@ -371,7 +212,7 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
         padding_mask: torch.BoolTensor | None = None,
         tokenizer_chunk_size: int | None = None,
         **kwargs: Unpack[TransformersKwargs],
-    ) -> tuple | VibeVoiceAsrEncoderOutput:
+    ):
         r"""
         input_values (`torch.FloatTensor` of shape `(batch_size, num_samples)`):
             Input audio tensor. Audio should be sampled at 24kHz.

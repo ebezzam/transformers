@@ -69,7 +69,7 @@ class VibeVoiceAsrModelTester:
             "pad_token_id": 1,  # Ensure pad token != audio token
         },
         acoustic_tokenizer_config={
-            "model_type": "vibevoice_asr_encoder",
+            "model_type": "vibevoice_acoustic_tokenizer_encoder",
             "hidden_size": 16,
             "kernel_size": 3,
             "n_filters": 4,
@@ -77,9 +77,9 @@ class VibeVoiceAsrModelTester:
             "depths": [1, 1],
         },
         semantic_tokenizer_config={
-            "model_type": "vibevoice_asr_encoder",
+            "model_type": "vibevoice_acoustic_tokenizer_encoder",
             "channels": 1,
-            "hidden_size": 32,
+            "hidden_size": 32,  # 2x acoustic hidden size
             "kernel_size": 3,
             "n_filters": 4,
             "downsampling_ratios": [2],

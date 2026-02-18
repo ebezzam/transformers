@@ -77,6 +77,10 @@ class VibeVoiceAcousticTokenizerEncoderConfig(PretrainedConfig):
         self.downsampling_ratios = downsampling_ratios
         self.depths = depths
 
+    @property
+    def hop_length(self):
+        return np.prod(self.downsampling_ratios)
+
 
 class VibeVoiceAcousticTokenizerDecoderConfig(PretrainedConfig):
     r"""
@@ -262,7 +266,7 @@ class VibeVoiceAcousticTokenizerConfig(PretrainedConfig):
 
     @property
     def hop_length(self):
-        return np.prod(self.encoder_config.downsampling_ratios)
+        return self.encoder_config.hop_length
 
 
 __all__ = [

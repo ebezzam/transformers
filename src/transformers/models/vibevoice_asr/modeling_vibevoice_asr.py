@@ -19,9 +19,6 @@
 # limitations under the License.
 
 
-from dataclasses import dataclass
-from typing import Optional
-
 import torch
 from torch import nn
 
@@ -33,9 +30,9 @@ from ...integrations import use_kernel_forward_from_hub
 from ...modeling_outputs import BaseModelOutputWithPooling, CausalLMOutputWithPast
 from ...modeling_utils import PreTrainedModel
 from ...processing_utils import Unpack
-from ...utils import ModelOutput, TransformersKwargs, auto_docstring, can_return_tuple, logging
+from ...utils import TransformersKwargs, auto_docstring, can_return_tuple, logging
 from ..auto import AutoModel, AutoModelForCausalLM
-from .configuration_vibevoice_asr import VibeVoiceAsrConfig, VibeVoiceAsrEncoderConfig
+from .configuration_vibevoice_asr import VibeVoiceAsrConfig
 
 
 logger = logging.get_logger(__name__)
@@ -295,154 +292,6 @@ class VibeVoiceAsrPreTrainedModel(PreTrainedModel):
             init.constant_(module.ffn_gamma, self.config.layer_scale_init_value)
 
 
-@dataclass
-@auto_docstring
-class VibeVoiceAsrEncoderOutput(ModelOutput):
-    r"""
-    latents (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
-        Projected latents (continuous representations for acoustic tokens) at the output of the encoder.
-    padding_cache (`VibeVoiceAsrConv1dPaddingCache`, *optional*, returned when `use_cache=True` is passed):
-        A [`VibeVoiceAsrConv1dPaddingCache`] instance containing cached convolution states for each encoder
-        layer that can be passed to subsequent forward calls.
-    """
-
-    latents: torch.FloatTensor | None = None
-    padding_cache: Optional["VibeVoiceAsrConv1dPaddingCache"] = None
-
-
-class VibeVoiceAsrEncoderStem(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-
-        self.conv = VibeVoiceAsrCausalConv1d(
-            in_channels=config.channels,
-            out_channels=config.num_filters,
-            kernel_size=config.kernel_size,
-            layer_idx=0,
-        )
-        self.stage = nn.ModuleList(
-            [
-                VibeVoiceAsrConvNext1dLayer(
-                    config,
-                    hidden_size=config.num_filters,
-                    layer_idx=layer_idx,
-                )
-                for layer_idx in range(1, config.depths[0] + 1)
-            ]
-        )
-
-    def forward(self, hidden_states, padding_cache=None):
-        hidden_states = self.conv(hidden_states, padding_cache=padding_cache)
-        for block in self.stage:
-            hidden_states = block(hidden_states, padding_cache=padding_cache)
-        return hidden_states
-
-
-class VibeVoiceAsrEncoderLayer(nn.Module):
-    def __init__(self, config, stage_idx):
-        super().__init__()
-
-        depth_idx = stage_idx + 1  # first depth is for stem layer
-        layer_idx = sum(depth + 1 for depth in config.depths[:depth_idx])
-        intermediate_channels = int(config.num_filters * (2 ** (depth_idx)))
-
-        self.conv = VibeVoiceAsrCausalConv1d(
-            in_channels=int(config.num_filters * (2**stage_idx)),
-            out_channels=intermediate_channels,
-            kernel_size=int(config.downsampling_ratios[stage_idx] * 2),
-            stride=config.downsampling_ratios[stage_idx],
-            layer_idx=layer_idx,
-        )
-        self.stage = nn.ModuleList(
-            [
-                VibeVoiceAsrConvNext1dLayer(config, hidden_size=intermediate_channels, layer_idx=layer_idx + offset)
-                for offset in range(1, config.depths[depth_idx] + 1)
-            ]
-        )
-
-    def forward(self, hidden_states, padding_cache=None):
-        hidden_states = self.conv(hidden_states, padding_cache=padding_cache)
-        for block in self.stage:
-            hidden_states = block(hidden_states, padding_cache=padding_cache)
-        return hidden_states
-
-
-class VibeVoiceAsrEncoder(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-
-        self.stem = VibeVoiceAsrEncoderStem(config)
-        self.conv_layers = nn.ModuleList(
-            [VibeVoiceAsrEncoderLayer(config, stage_idx) for stage_idx in range(len(config.downsampling_ratios))]
-        )
-        self.head = VibeVoiceAsrCausalConv1d(
-            in_channels=int(config.num_filters * (2 ** len(config.downsampling_ratios))),
-            out_channels=config.hidden_size,
-            kernel_size=config.kernel_size,
-            layer_idx=sum(depth + 1 for depth in config.depths),
-        )
-
-    def forward(self, hidden_states, padding_cache=None):
-        hidden_states = self.stem(hidden_states, padding_cache=padding_cache)
-        for layer in self.conv_layers:
-            hidden_states = layer(hidden_states, padding_cache=padding_cache)
-        hidden_states = self.head(hidden_states, padding_cache=padding_cache)
-        return hidden_states.permute(0, 2, 1)
-
-
-@auto_docstring(
-    custom_intro="""
-    Tokenizer which only encodes audio into latent representations.
-    """
-)
-class VibeVoiceAsrEncoderModel(VibeVoiceAsrPreTrainedModel):
-    config: VibeVoiceAsrEncoderConfig
-    main_input_name = "input_values"
-    input_modalities = "audio"
-
-    def __init__(self, config):
-        super().__init__(config)
-        self.encoder = VibeVoiceAsrEncoder(config)
-        self.post_init()
-
-    @can_return_tuple
-    @auto_docstring
-    def forward(self, input_values, padding_cache=None, use_cache=None, **kwargs):
-        r"""
-        input_values (`torch.FloatTensor` of shape `(batch_size, channels, sequence_length)`):
-            Input audio waveform to be encoded into latent representations.
-        padding_cache (`VibeVoiceAsrConv1dPaddingCache`, *optional*):
-            Cache object for streaming mode to maintain convolution states across layers.
-        use_cache (`bool`, *optional*):
-            Whether to use caching for convolution states.
-        """
-        if use_cache and padding_cache is None:
-            per_layer_padding = [self.encoder.stem.conv.causal_padding]
-            per_layer_in_channels = [self.encoder.stem.conv.conv.in_channels]
-            per_layer_padding.extend([block.mixer.causal_padding for block in self.encoder.stem.stage])
-            per_layer_in_channels.extend([block.mixer.conv.in_channels for block in self.encoder.stem.stage])
-            for layer in self.encoder.conv_layers:
-                per_layer_padding.append(layer.conv.causal_padding)
-                per_layer_in_channels.append(layer.conv.conv.in_channels)
-                per_layer_padding.extend([block.mixer.causal_padding for block in layer.stage])
-                per_layer_in_channels.extend([block.mixer.conv.in_channels for block in layer.stage])
-            per_layer_padding.append(self.encoder.head.causal_padding)
-            per_layer_in_channels.append(self.encoder.head.conv.in_channels)
-
-            padding_cache = VibeVoiceAsrConv1dPaddingCache(
-                num_layers=len(per_layer_padding),
-                per_layer_padding=per_layer_padding,
-                per_layer_padding_mode=["constant"] * len(per_layer_padding),
-                per_layer_in_channels=per_layer_in_channels,
-            )
-        latents = self.encoder(input_values, padding_cache=padding_cache)
-
-        return VibeVoiceAsrEncoderOutput(
-            latents=latents,
-            padding_cache=padding_cache if use_cache else None,
-        )
-
-
 @auto_docstring(
     custom_intro="""
     The VibeVoice ASR model with pre-trained acoustic tokenizers and a language model.
@@ -490,7 +339,7 @@ class VibeVoiceAsrForConditionalGeneration(VibeVoiceAsrPreTrainedModel, Generati
         padding_mask: torch.BoolTensor | None = None,
         tokenizer_chunk_size: int | None = None,
         **kwargs: Unpack[TransformersKwargs],
-    ) -> tuple | VibeVoiceAsrEncoderOutput:
+    ) -> tuple | BaseModelOutputWithPooling:
         r"""
         input_values (`torch.FloatTensor` of shape `(batch_size, num_samples)`):
             Input audio tensor. Audio should be sampled at 24kHz.
