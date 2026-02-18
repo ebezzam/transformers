@@ -184,7 +184,6 @@ class VibeVoiceAsrConfig(PretrainedConfig):
     ```"""
 
     model_type = "vibevoice_asr"
-    is_composition = True
     sub_configs = {
         "acoustic_tokenizer_config": AutoConfig,
         "semantic_tokenizer_config": AutoConfig,
