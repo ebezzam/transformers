@@ -154,6 +154,14 @@ print(f"Reconstructed audio saved to : {output_fp}")
 
 [[autodoc]] VibeVoiceAcousticTokenizerConfig
 
+## VibeVoiceAcousticTokenizerEncoderConfig
+
+[[autodoc]] VibeVoiceAcousticTokenizerEncoderConfig
+
+## VibeVoiceAcousticTokenizerDecoderConfig
+
+[[autodoc]] VibeVoiceAcousticTokenizerDecoderConfig
+
 ## VibeVoiceAcousticTokenizerFeatureExtractor
 
 [[autodoc]] VibeVoiceAcousticTokenizerFeatureExtractor
@@ -164,4 +172,14 @@ print(f"Reconstructed audio saved to : {output_fp}")
 [[autodoc]] VibeVoiceAcousticTokenizerModel
     - encode
     - decode
+    - forward
+
+## VibeVoiceAcousticTokenizerEncoderModel
+
+[[autodoc]] VibeVoiceAcousticTokenizerEncoderModel
+    - forward
+
+## VibeVoiceAcousticTokenizerDecoderModel
+
+[[autodoc]] VibeVoiceAcousticTokenizerDecoderModel
     - forward

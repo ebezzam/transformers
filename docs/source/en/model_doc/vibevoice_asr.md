@@ -406,11 +406,6 @@ print(f"\nSpeedup: {speedup:.2f}x")
     - apply_transcription_request
     - batch_decode
 
-## VibeVoiceAsrEncoderModel
-
-[[autodoc]] VibeVoiceAsrEncoderModel
-    - forward
-
 ## VibeVoiceAsrForConditionalGeneration
 
 [[autodoc]] VibeVoiceAsrForConditionalGeneration

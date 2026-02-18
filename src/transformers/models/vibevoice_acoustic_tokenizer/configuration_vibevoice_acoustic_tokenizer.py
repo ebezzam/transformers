@@ -20,7 +20,15 @@ from ...configuration_utils import PretrainedConfig
 
 class VibeVoiceAcousticTokenizerEncoderConfig(PretrainedConfig):
     r"""
-    Configuration class for [`VibeVoiceAcousticTokenizerEncoderModel`].
+    This is the configuration class to store the configuration of a [`VibeVoiceAcousticTokenizerEncoderModel`]. It is
+    used to instantiate a VibeVoice acoustic tokenizer encoder model according to the specified arguments, defining the
+    model architecture. Instantiating a configuration with the defaults will yield a similar configuration of the
+    acoustic tokenizer within the VibeVoice architecture.
+
+    e.g. [microsoft/VibeVoice-1.5B](https://huggingface.co/microsoft/VibeVoice-1.5B)
+
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
         channels (`int`, *optional*, defaults to 1):
@@ -84,7 +92,15 @@ class VibeVoiceAcousticTokenizerEncoderConfig(PretrainedConfig):
 
 class VibeVoiceAcousticTokenizerDecoderConfig(PretrainedConfig):
     r"""
-    Configuration class for [`VibeVoiceAcousticTokenizerDecoderModel`].
+    This is the configuration class to store the configuration of a [`VibeVoiceAcousticTokenizerDecoderModel`]. It is
+    used to instantiate a VibeVoice acoustic tokenizer decoder model according to the specified arguments, defining the
+    model architecture. Instantiating a configuration with the defaults will yield a similar configuration of the
+    acoustic tokenizer within the VibeVoice architecture.
+
+    e.g. [microsoft/VibeVoice-1.5B](https://huggingface.co/microsoft/VibeVoice-1.5B)
+
+    Configuration objects inherit from [`PreTrainedConfig`] and can be used to control the model outputs. Read the
+    documentation from [`PreTrainedConfig`] for more information.
 
     Args:
         channels (`int`, *optional*, defaults to 1):
@@ -102,9 +118,9 @@ class VibeVoiceAcousticTokenizerDecoderConfig(PretrainedConfig):
         num_filters (`int`, *optional*, defaults to 32):
             Number of filters after final upsampling.
         upsampling_ratios (`List[int]`, *optional*, defaults to `[8, 5, 5, 4, 2, 2]`):
-            Upsampling ratios for each layer (reverse of encoder downsampling).
-        decoder_depths (`List[int]`, *optional*, defaults to `[8, 3, 3, 3, 3, 3, 3]`):
-            Number of ConvNeXt blocks at each decoder stage (reverse of encoder depths).
+            Upsampling ratios for each layer.
+        depths (`List[int]`, *optional*, defaults to `[8, 3, 3, 3, 3, 3, 3]`):
+            Number of ConvNeXt blocks at each decoder stage.
         hidden_act (`str`, *optional*, defaults to `"gelu"`):
             Activation function to use.
         ffn_expansion (`int`, *optional*, defaults to 4):
@@ -123,7 +139,7 @@ class VibeVoiceAcousticTokenizerDecoderConfig(PretrainedConfig):
         initializer_range=1e-2,
         num_filters=32,
         upsampling_ratios=[8, 5, 5, 4, 2, 2],
-        decoder_depths=[8, 3, 3, 3, 3, 3, 3],
+        depths=[8, 3, 3, 3, 3, 3, 3],
         hidden_act="gelu",
         ffn_expansion=4,
         **kwargs,
@@ -139,7 +155,7 @@ class VibeVoiceAcousticTokenizerDecoderConfig(PretrainedConfig):
         self.initializer_range = initializer_range
         self.num_filters = num_filters
         self.upsampling_ratios = upsampling_ratios
-        self.decoder_depths = decoder_depths
+        self.depths = depths
 
 
 class VibeVoiceAcousticTokenizerConfig(PretrainedConfig):
@@ -253,7 +269,7 @@ class VibeVoiceAcousticTokenizerConfig(PretrainedConfig):
                 initializer_range=initializer_range,
                 num_filters=num_filters,
                 upsampling_ratios=list(reversed(downsampling_ratios)),
-                decoder_depths=list(reversed(depths)),
+                depths=list(reversed(depths)),
                 hidden_act=hidden_act,
                 ffn_expansion=ffn_expansion,
             )

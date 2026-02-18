@@ -311,7 +311,7 @@ class VibeVoiceAcousticTokenizerEncoderModel(VibeVoiceAcousticTokenizerPreTraine
         )
         self.post_init()
 
-    def forward(self, hidden_states, padding_cache=None, use_cache=False):
+    def forward(self, hidden_states, padding_cache=None, use_cache=False, **kwargs):
         if use_cache and padding_cache is None:
             per_layer_padding = [self.stem.conv.causal_padding]
             per_layer_in_channels = [self.stem.conv.conv.in_channels]
@@ -344,7 +344,7 @@ class VibeVoiceAcousticTokenizerDecoderStem(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        intermediate_channels = int(config.num_filters * 2 ** (len(config.decoder_depths) - 1))
+        intermediate_channels = int(config.num_filters * 2 ** (len(config.depths) - 1))
         self.conv = VibeVoiceAcousticTokenizerCausalConv1d(
             in_channels=config.hidden_size,
             out_channels=intermediate_channels,
@@ -358,7 +358,7 @@ class VibeVoiceAcousticTokenizerDecoderStem(nn.Module):
                     hidden_size=intermediate_channels,
                     layer_idx=layer_idx,
                 )
-                for layer_idx in range(1, config.decoder_depths[0] + 1)
+                for layer_idx in range(1, config.depths[0] + 1)
             ]
         )
 
@@ -374,11 +374,11 @@ class VibeVoiceAcousticTokenizerDecoderLayer(nn.Module):
         super().__init__()
 
         depth_idx = stage_idx + 1  # first depth is for stem layer
-        layer_idx = sum(depth + 1 for depth in config.decoder_depths[:depth_idx])
-        intermediate_channels = int(config.num_filters * (2 ** (len(config.decoder_depths) - 2 - stage_idx)))
+        layer_idx = sum(depth + 1 for depth in config.depths[:depth_idx])
+        intermediate_channels = int(config.num_filters * (2 ** (len(config.depths) - 2 - stage_idx)))
 
         self.convtr = VibeVoiceAcousticTokenizerCausalConvTranspose1d(
-            in_channels=int(config.num_filters * (2 ** (len(config.decoder_depths) - 1 - stage_idx))),
+            in_channels=int(config.num_filters * (2 ** (len(config.depths) - 1 - stage_idx))),
             out_channels=intermediate_channels,
             kernel_size=int(config.upsampling_ratios[stage_idx] * 2),
             stride=config.upsampling_ratios[stage_idx],
@@ -389,7 +389,7 @@ class VibeVoiceAcousticTokenizerDecoderLayer(nn.Module):
                 VibeVoiceAcousticTokenizerConvNext1dLayer(
                     config, hidden_size=intermediate_channels, layer_idx=layer_idx + offset
                 )
-                for offset in range(1, config.decoder_depths[depth_idx] + 1)
+                for offset in range(1, config.depths[depth_idx] + 1)
             ]
         )
 
@@ -415,11 +415,11 @@ class VibeVoiceAcousticTokenizerDecoderModel(VibeVoiceAcousticTokenizerPreTraine
             in_channels=config.num_filters,
             out_channels=config.channels,
             kernel_size=config.kernel_size,
-            layer_idx=sum(depth + 1 for depth in config.decoder_depths),
+            layer_idx=sum(depth + 1 for depth in config.depths),
         )
         self.post_init()
 
-    def forward(self, hidden_states, padding_cache=None, use_cache=False):
+    def forward(self, hidden_states, padding_cache=None, use_cache=False, **kwargs):
         if use_cache and padding_cache is None:
             per_layer_padding = [self.stem.conv.causal_padding]
             per_layer_in_channels = [self.stem.conv.conv.in_channels]
@@ -476,7 +476,9 @@ class VibeVoiceAcousticTokenizerModel(VibeVoiceAcousticTokenizerPreTrainedModel)
 
         if sample:
             noise_std = self.config.vae_std * torch.randn(
-                encoder_output.latents.shape[0], device=encoder_output.latents.device, dtype=encoder_output.latents.dtype
+                encoder_output.latents.shape[0],
+                device=encoder_output.latents.device,
+                dtype=encoder_output.latents.dtype,
             )
             encoder_output.latents = encoder_output.latents + noise_std[:, None, None] * torch.randn_like(
                 encoder_output.latents

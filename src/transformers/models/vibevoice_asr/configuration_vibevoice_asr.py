@@ -56,11 +56,11 @@ class VibeVoiceAsrConfig(PretrainedConfig):
     Example:
 
     ```python
-    >>> from transformers import VibeVoiceAsrForConditionalGeneration, VibeVoiceAsrConfig, VibeVoiceAsrEncoderConfig, Qwen2Config
+    >>> from transformers import VibeVoiceAsrForConditionalGeneration, VibeVoiceAsrConfig, VibeVoiceAcousticTokenizerEncoderConfig, Qwen2Config
 
     >>> # Initializing VibeVoice acoustic and semantic encoder configs
-    >>> acoustic_config = VibeVoiceAsrEncoderConfig()
-    >>> semantic_config = VibeVoiceAsrEncoderConfig(hidden_size=128)
+    >>> acoustic_config = VibeVoiceAcousticTokenizerEncoderConfig()
+    >>> semantic_config = VibeVoiceAcousticTokenizerEncoderConfig(hidden_size=128)
 
     >>> # Initializing a Qwen2 config
     >>> text_config = Qwen2Config()
@@ -76,7 +76,6 @@ class VibeVoiceAsrConfig(PretrainedConfig):
     ```"""
 
     model_type = "vibevoice_asr"
-    is_composition = True
     sub_configs = {
         "acoustic_tokenizer_config": AutoConfig,
         "semantic_tokenizer_config": AutoConfig,
@@ -133,4 +132,4 @@ class VibeVoiceAsrConfig(PretrainedConfig):
         super().__init__(**kwargs)
 
 
-__all__ = ["VibeVoiceAsrConfig", "VibeVoiceAsrEncoderConfig"]
+__all__ = ["VibeVoiceAsrConfig"]

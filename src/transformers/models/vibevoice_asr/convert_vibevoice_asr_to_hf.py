@@ -26,8 +26,8 @@ from safetensors.torch import load_file
 from transformers import (
     Qwen2Config,
     Qwen2TokenizerFast,
-    VibeVoiceAcousticTokenizerFeatureExtractor,
     VibeVoiceAcousticTokenizerEncoderConfig,
+    VibeVoiceAcousticTokenizerFeatureExtractor,
     VibeVoiceAsrConfig,
     VibeVoiceAsrForConditionalGeneration,
     VibeVoiceAsrProcessor,

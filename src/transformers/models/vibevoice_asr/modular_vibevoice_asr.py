@@ -25,8 +25,9 @@ from ..audioflamingo3.modeling_audioflamingo3 import AudioFlamingo3ForConditiona
 from ..auto import CONFIG_MAPPING, AutoConfig, AutoModel
 from ..mimi.modeling_mimi import MimiConv1dPaddingCache
 from ..qwen2.modeling_qwen2 import Qwen2RMSNorm
-from ..vibevoice_acoustic_tokenizer.configuration_vibevoice_acoustic_tokenizer import VibeVoiceAcousticTokenizerConfig
-from ..vibevoice_acoustic_tokenizer.modeling_vibevoice_acoustic_tokenizer import VibeVoiceAcousticTokenizerPreTrainedModel
+from ..vibevoice_acoustic_tokenizer.modeling_vibevoice_acoustic_tokenizer import (
+    VibeVoiceAcousticTokenizerPreTrainedModel,
+)
 
 
 logger = logging.get_logger(__name__)
@@ -65,11 +66,11 @@ class VibeVoiceAsrConfig(PretrainedConfig):
     Example:
 
     ```python
-    >>> from transformers import VibeVoiceAsrForConditionalGeneration, VibeVoiceAsrConfig, VibeVoiceAsrEncoderConfig, Qwen2Config
+    >>> from transformers import VibeVoiceAsrForConditionalGeneration, VibeVoiceAsrConfig, VibeVoiceAcousticTokenizerEncoderConfig, Qwen2Config
 
     >>> # Initializing VibeVoice acoustic and semantic encoder configs
-    >>> acoustic_config = VibeVoiceAsrEncoderConfig()
-    >>> semantic_config = VibeVoiceAsrEncoderConfig(hidden_size=128)
+    >>> acoustic_config = VibeVoiceAcousticTokenizerEncoderConfig()
+    >>> semantic_config = VibeVoiceAcousticTokenizerEncoderConfig(hidden_size=128)
 
     >>> # Initializing a Qwen2 config
     >>> text_config = Qwen2Config()
@@ -354,8 +355,6 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
 
 __all__ = [
     "VibeVoiceAsrConfig",
-    "VibeVoiceAsrEncoderConfig",
     "VibeVoiceAsrForConditionalGeneration",
     "VibeVoiceAsrPreTrainedModel",
-    "VibeVoiceAsrEncoderModel",
 ]
