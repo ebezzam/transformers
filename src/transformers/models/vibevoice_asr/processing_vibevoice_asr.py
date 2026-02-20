@@ -248,7 +248,7 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
             **kwargs,
         )
 
-    def decode(self, *args, return_as_dicts=False, extract_transcription=False, **kwargs):
+    def decode(self, *args, return_format="raw", **kwargs):
         """
         Forward arguments to [`~PreTrainedTokenizer.decode`] and optionally parse the dict-like output.
 
@@ -261,22 +261,27 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
         ```
 
         Args:
-            return_as_dicts (`bool`, *optional*, defaults to `False`):
-                Whether to reformat each decoded output as a list of dicts for each speaker.
-            extract_transcription (`bool`, *optional*, defaults to `False`):
-                Whether to extract only the transcription content from each decoded output, dropping the speaker tags
-                and timestamps.
+            return_format (`str`, *optional*, defaults to `"raw"`):
+                Options are:
+                - `"raw"`: Return a list of raw decoded strings from the tokenizer, without any parsing.
+                - `"parsed"`: Return a list of list of parsed dictionary objects for each speaker utterance with timestamps.
+                - `"transcription_only"`: Return a list of extracted transcription strings.
 
-        Returns:
-            `list`: If `return_as_dicts=True`, returns list of parsed dictionary objects.
-                If `extract_transcription=True`, returns list of extracted transcription strings.
+                `skip_special_tokens` is automatically enforced (hard-set) to `True` for `"parsed"` and `"transcription_only"`.
         """
-        decoded = self.tokenizer.decode(*args, **kwargs)
+        return_types = ["raw", "parsed", "transcription_only"]
+        if return_format not in return_types:
+            raise ValueError(f"return_format must be one of {return_types}.")
+        if return_format != "raw":
+            skip_special_tokens = True
+        else:
+            skip_special_tokens = kwargs.get("skip_special_tokens", False)
 
-        if return_as_dicts or extract_transcription:
+        decoded = self.tokenizer.decode(*args, skip_special_tokens=skip_special_tokens, **kwargs)
+
+        if return_format != "raw":
             decoded = [self._parse_dict_output(text) for text in decoded]
-
-        if extract_transcription:
+        if return_format == "transcription_only":
             return [self._extract_content_from_dict(dict_output) for dict_output in decoded]
         else:
             return decoded
@@ -298,6 +303,25 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
 
         if segments and not all(isinstance(seg, dict) and "Content" in seg for seg in segments):
             logger.warning("Not all segments have expected structure.")
+            return text
+
+        time_stamps_valid = True
+        for seg in segments:
+            if isinstance(seg, dict):
+                for key in ("Start", "End"):
+                    val = seg.get(key, None)
+                    if val is not None and not isinstance(val, float):
+                        if isinstance(val, (int, float)):
+                            seg[key] = float(val)
+                        else:
+                            logger.warning(f"Expected '{key}' to be a number, got {type(val).__name__}.")
+                            time_stamps_valid = False
+                            break
+            else:
+                logger.warning(f"Expected segment to be dict, got {type(seg).__name__}.")
+                time_stamps_valid = False
+                break
+        if not time_stamps_valid:
             return text
 
         return segments

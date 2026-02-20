@@ -13,7 +13,7 @@ specific language governing permissions and limitations under the License.
 rendered properly in your Markdown viewer.
 
 -->
-*This model was released on 2026-01-26 and added to Hugging Face Transformers on 2026-02-09.*
+*This model was released on 2026-01-26 and added to Hugging Face Transformers on 2026-02-20.*
 
 # VibeVoice ASR
 
@@ -69,13 +69,13 @@ inputs = processor.apply_transcription_request(
 # Apply model
 output_ids = model.generate(**inputs)
 generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
-transcription = processor.batch_decode(generated_ids)[0]
+transcription = processor.decode(generated_ids)[0]
 print("\n" + "=" * 60)
 print("RAW OUTPUT")
 print("=" * 60)
 print(transcription)
 
-transcription = processor.batch_decode(generated_ids, return_as_dicts=True)[0]
+transcription = processor.decode(generated_ids, return_format="parsed")[0]
 print("\n" + "=" * 60)
 print("TRANSCRIPTION (list of dicts)")
 print("=" * 60)
@@ -83,7 +83,7 @@ for speaker_transcription in transcription:
     print(speaker_transcription)
 
 # Remove speaker labels, only get raw transcription
-transcription = processor.batch_decode(generated_ids, extract_transcription=True)[0]
+transcription = processor.decode(generated_ids, return_format="transcription_only")[0]
 print("\n" + "=" * 60)
 print("TRANSCRIPTION ONLY")
 print("=" * 60)
@@ -93,8 +93,9 @@ print(transcription)
 ============================================================
 RAW OUTPUT
 ============================================================
-assistant
-[{"Start":0,"End":15.43,"Speaker":0,"Content":"Hello everyone and welcome to the Vibe Voice podcast. I'm your host, Alex, and today we're getting into one of the biggest debates in all of sports: who's the greatest basketball player of all time? I'm so excited to have Sam here to talk about it with me."},{"Start":15.43,"End":21.05,"Speaker":1,"Content":"Thanks so much for having me, Alex. And you're absolutely right. This question always brings out some seriously strong feelings."},{"Start":21.05,"End":31.66,"Speaker":0,"Content":"Okay, so let's get right into it. For me, it has to be Michael Jordan. Six trips to the finals, six championships. That kind of perfection is just incredible."},{"Start":31.66,"End":40.93,"Speaker":1,"Content":"Oh man, the first thing that always pops into my head is that shot against the Cleveland Cavaliers back in '89. Jordan just rises, hangs in the air forever, and just sinks it."}]
+<|im_start|>assistant
+[{"Start":0,"End":15.43,"Speaker":0,"Content":"Hello everyone and welcome to the Vibe Voice podcast. I'm your host, Alex, and today we're getting into one of the biggest debates in all of sports: who's the greatest basketball player of all time? I'm so excited to have Sam here to talk about it with me."},{"Start":15.43,"End":21.05,"Speaker":1,"Content":"Thanks so much for having me, Alex. And you're absolutely right. This question always brings out some seriously strong feelings."},{"Start":21.05,"End":31.66,"Speaker":0,"Content":"Okay, so let's get right into it. For me, it has to be Michael Jordan. Six trips to the finals, six championships. That kind of perfection is just incredible."},{"Start":31.66,"End":40.93,"Speaker":1,"Content":"Oh man, the first thing that always pops into my head is that shot against the Cleveland Cavaliers back in '89. Jordan just rises, hangs in the air forever, and just sinks it."}]<|im_end|>
+<|endoftext|>
 
 ============================================================
 TRANSCRIPTION (list of dicts)
@@ -111,7 +112,7 @@ Hello everyone and welcome to the Vibe Voice podcast. I'm your host, Alex, and t
 """
 ```
 
-The VibeVoice ASR model is trained to generate a string that resembles a JSON structure. The flag `return_as_dicts=True` tries to return the generated output as a list of dicts, while `extract_transcription=True` tries to extract only the transcribed audio. If they fail, the generated output is returned as-is.
+The VibeVoice ASR model is trained to generate a string that resembles a JSON structure. The flag `return_format="parsed"` tries to return the generated output as a list of dicts, while `return_format="transcription_only"` tries to extract only the transcribed audio. If they fail, the generated output is returned as-is.
 
 ### Providing context
 
@@ -133,7 +134,7 @@ inputs = processor.apply_transcription_request(
 ).to(model.device, model.dtype)
 output_ids = model.generate(**inputs)
 generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
-transcription = processor.batch_decode(generated_ids, extract_transcription=True)[0]
+transcription = processor.decode(generated_ids, return_format="transcription_only")[0]
 print(f"WITHOUT CONTEXT: {transcription}")
 
 # With context
@@ -143,7 +144,7 @@ inputs = processor.apply_transcription_request(
 ).to(model.device, model.dtype)
 output_ids = model.generate(**inputs)
 generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
-transcription = processor.batch_decode(generated_ids, extract_transcription=True)[0]
+transcription = processor.decode(generated_ids, return_format="transcription_only")[0]
 print(f"WITH CONTEXT   : {transcription}")
 
 """
@@ -173,7 +174,7 @@ print(f"Model loaded on {model.device} with dtype {model.dtype}")
 inputs = processor.apply_transcription_request(audio, prompt=prompts).to(model.device, model.dtype)
 output_ids = model.generate(**inputs)
 generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
-transcription = processor.batch_decode(generated_ids, extract_transcription=True)
+transcription = processor.decode(generated_ids, return_format="transcription_only")
 
 print(transcription)
 ```
@@ -202,7 +203,8 @@ print(f"Model loaded on {model.device} with dtype {model.dtype}")
 inputs = processor.apply_transcription_request(audio, prompt=prompts).to(model.device, model.dtype)
 output_ids = model.generate(**inputs, tokenizer_chunk_size=tokenizer_chunk_size)
 generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
-transcription = processor.batch_decode(generated_ids, extract_transcription=True)
+transcription = processor.decode(generated_ids, return_format="transcription_only")
+print(transcription)
 ```
 
 ### Chat template
@@ -249,7 +251,7 @@ inputs = processor.apply_chat_template(
 
 output_ids = model.generate(**inputs)
 generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
-transcription = processor.batch_decode(generated_ids, extract_transcription=True)
+transcription = processor.decode(generated_ids, return_format="transcription_only")
 print(transcription)
 ```
 
@@ -389,6 +391,41 @@ speedup = no_compile_time / compile_time
 print(f"\nSpeedup: {speedup:.2f}x")
 ```
 
+### Pipeline usage
+
+The model can be used as a pipeline, but you will have to define your own methods for parsing the raw output.
+
+```python
+from transformers import pipeline
+
+model_id = "bezzam/VibeVoice-ASR-7B"
+pipe = pipeline("any-to-any", model=model_id, device_map="auto")
+chat_template = [
+    {
+        "role": "user",
+        "content": [
+            {"type": "text", "text": "About VibeVoice"},
+            {
+                "type": "audio",
+                "path": "https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav",
+            },
+        ],
+    }
+]
+outputs = pipe(text=chat_template, return_full_text=False)
+
+print("\n" + "=" * 60)
+print("RAW PIPELINE OUTPUT")
+print("=" * 60)
+print(outputs)
+
+"""
+============================================================
+RAW PIPELINE OUTPUT
+============================================================
+[{'input_text': [{'role': 'user', 'content': [{'type': 'text', 'text': 'About VibeVoice'}, {'type': 'audio', 'path': 'https://huggingface.co/datasets/bezzam/vibevoice_samples/resolve/main/realtime_model/vibevoice_tts_german.wav'}]}], 'generated_text': 'assistant\n[{"Start":0.0,"End":7.56,"Speaker":0,"Content":"VibeVoice is this novel framework designed for generating expressive, long-form, multi-speaker conversational audio."}]\n'}]
+"""
+```
 
 
 ## VibeVoiceAsrEncoderConfig
@@ -404,7 +441,7 @@ print(f"\nSpeedup: {speedup:.2f}x")
 [[autodoc]] VibeVoiceAsrProcessor
     - __call__
     - apply_transcription_request
-    - batch_decode
+    - decode
 
 ## VibeVoiceAsrForConditionalGeneration
 

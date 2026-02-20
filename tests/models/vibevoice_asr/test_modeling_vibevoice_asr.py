@@ -320,7 +320,7 @@ class VibeVoiceAsrForConditionalGenerationIntegrationTest(unittest.TestCase):
         output = model.generate(**inputs)
         gen_ids = output[:, inputs["input_ids"].shape[1] :]
         torch.testing.assert_close(gen_ids.cpu(), torch.tensor(expected_outputs["generated_ids"]))
-        txt = self.processor.batch_decode(gen_ids, skip_special_tokens=True)
+        txt = self.processor.decode(gen_ids, skip_special_tokens=True)
         self.assertListEqual(txt, expected_outputs["transcriptions"])
 
     @slow
@@ -352,7 +352,7 @@ class VibeVoiceAsrForConditionalGenerationIntegrationTest(unittest.TestCase):
         for i, exp_gen in enumerate(expected_outputs["generated_ids"]):
             actual_gen = gen_ids[i, : len(exp_gen)]
             torch.testing.assert_close(actual_gen.cpu(), torch.tensor(exp_gen))
-        txt = self.processor.batch_decode(gen_ids, skip_special_tokens=True)
+        txt = self.processor.decode(gen_ids, skip_special_tokens=True)
         self.assertListEqual(txt, expected_outputs["transcriptions"])
 
     @slow
@@ -394,5 +394,5 @@ class VibeVoiceAsrForConditionalGenerationIntegrationTest(unittest.TestCase):
         output = model.generate(**inputs)
         gen_ids = output[:, inputs["input_ids"].shape[1] :]
         torch.testing.assert_close(gen_ids.cpu(), torch.tensor(raw["generated_ids"]))
-        txt = self.processor.batch_decode(gen_ids, skip_special_tokens=True)
+        txt = self.processor.decode(gen_ids, skip_special_tokens=True)
         self.assertListEqual(txt, raw["transcriptions"])

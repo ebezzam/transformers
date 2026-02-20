@@ -114,3 +114,36 @@ class VibeVoiceAsrProcessorTest(ProcessorTesterMixin, unittest.TestCase):
 
     def test_apply_chat_template_assistant_mask(self):
         self.skipTest("VibeVoiceAsrProcessor does not support chat templates with text-only inputs.")
+
+    @require_torch
+    def test_decode_output_formats(self):
+        import torch
+
+        processor = VibeVoiceAsrProcessor.from_pretrained(self.checkpoint)
+
+        # fmt: off
+        # reproducer: https://gist.github.com/ebezzam/e1200bcecdc29e87dadd9d8423ae7ecb#file-reproducer_generated_ids-py
+        generated_ids = torch.tensor([[151644,  77091,    198,     58,   4913,   3479,    788,     15,   1335,
+           3727,    788,     22,     13,     20,     21,   1335,  82036,    788,
+             15,   1335,   2762,   3252,    693,    586,  40683,    374,    264,
+          11514,  12626,   6188,    369,  23163,  77123,     11,   1293,   8460,
+             11,   7299,  52975,   4407,   7517,   1663,   7699,   1189,  25439,
+         151645,    198, 151643]]
+        )
+        # fmt: on
+
+        # test parsed output
+        dicts = processor.decode(generated_ids, return_format="parsed")
+        self.assertIsInstance(dicts, list)
+        self.assertIsInstance(dicts[0], list)
+        self.assertIsInstance(dicts[0][0], dict)
+        self.assertIn("Content", dicts[0][0])
+        self.assertIn("Start", dicts[0][0])
+        self.assertIn("End", dicts[0][0])
+        self.assertIsInstance(dicts[0][0]["Start"], float)
+        self.assertIsInstance(dicts[0][0]["End"], float)
+
+        # test transcript only
+        transcript = processor.decode(generated_ids, return_format="transcription_only")
+        self.assertIsInstance(transcript, list)
+        self.assertIsInstance(transcript[0], str)
