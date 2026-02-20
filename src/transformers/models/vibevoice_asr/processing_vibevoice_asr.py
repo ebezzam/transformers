@@ -248,11 +248,9 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
             **kwargs,
         )
 
-    def batch_decode(
-        self, *args, return_as_dicts=False, extract_transcription=False, skip_special_tokens=True, **kwargs
-    ):
+    def decode(self, *args, return_as_dicts=False, extract_transcription=False, **kwargs):
         """
-        Forward arguments to [`~PreTrainedTokenizer.batch_decode`] and optionally parse the dict-like output.
+        Forward arguments to [`~PreTrainedTokenizer.decode`] and optionally parse the dict-like output.
 
         VibeVoice ASR outputs transcriptions in a dictionary-like format, e.g.:
         ```
@@ -273,7 +271,7 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
             `list`: If `return_as_dicts=True`, returns list of parsed dictionary objects.
                 If `extract_transcription=True`, returns list of extracted transcription strings.
         """
-        decoded = self.tokenizer.batch_decode(*args, skip_special_tokens=skip_special_tokens, **kwargs)
+        decoded = self.tokenizer.decode(*args, **kwargs)
 
         if return_as_dicts or extract_transcription:
             decoded = [self._parse_dict_output(text) for text in decoded]

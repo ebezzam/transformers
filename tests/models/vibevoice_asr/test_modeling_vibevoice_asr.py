@@ -68,7 +68,7 @@ class VibeVoiceAsrModelTester:
             "vocab_size": 99,
             "pad_token_id": 1,  # Ensure pad token != audio token
         },
-        acoustic_tokenizer_config={
+        acoustic_tokenizer_encoder_config={
             "model_type": "vibevoice_acoustic_tokenizer_encoder",
             "hidden_size": 16,
             "kernel_size": 3,
@@ -76,7 +76,7 @@ class VibeVoiceAsrModelTester:
             "downsampling_ratios": [2],
             "depths": [1, 1],
         },
-        semantic_tokenizer_config={
+        semantic_tokenizer_encoder_config={
             "model_type": "vibevoice_acoustic_tokenizer_encoder",
             "channels": 1,
             "hidden_size": 32,  # 2x acoustic hidden size
@@ -93,8 +93,8 @@ class VibeVoiceAsrModelTester:
         self.audio_samples = audio_samples
         self.is_training = is_training
         self.text_config = text_config
-        self.acoustic_tokenizer_config = acoustic_tokenizer_config
-        self.semantic_tokenizer_config = semantic_tokenizer_config
+        self.acoustic_tokenizer_encoder_config = acoustic_tokenizer_encoder_config
+        self.semantic_tokenizer_encoder_config = semantic_tokenizer_encoder_config
         self.batch_size = 2
         self.vocab_size = text_config["vocab_size"]
         self.hidden_size = text_config["hidden_size"]
@@ -104,8 +104,8 @@ class VibeVoiceAsrModelTester:
 
     def get_config(self):
         return VibeVoiceAsrConfig(
-            acoustic_tokenizer_config=self.acoustic_tokenizer_config,
-            semantic_tokenizer_config=self.semantic_tokenizer_config,
+            acoustic_tokenizer_encoder_config=self.acoustic_tokenizer_encoder_config,
+            semantic_tokenizer_encoder_config=self.semantic_tokenizer_encoder_config,
             text_config=self.text_config,
             audio_token_id=self.audio_token_id,
         )
@@ -249,7 +249,7 @@ class VibeVoiceAsrForConditionalGenerationModelTest(ModelTesterMixin, Generation
                     batch_size,
                     f"batch_size mismatch, full shape: {last_hidden_state_shape}",
                 )
-                audio_config = config.acoustic_tokenizer_config
+                audio_config = config.acoustic_tokenizer_encoder_config
                 hidden_size = audio_config.hidden_size
                 self.assertEqual(
                     last_hidden_state_shape[-1],

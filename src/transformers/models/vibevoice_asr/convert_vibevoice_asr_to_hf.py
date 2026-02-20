@@ -50,16 +50,16 @@ STATE_DICT_MAPPING = {
     r"^lm_head\.":                                                                  r"language_model.lm_head.",
 
     # Acoustic and semantic tokenizer (encoder-only)
-    r"^model\.acoustic_tokenizer\.encoder\.downsample_layers\.0\.0\.conv\.":       r"acoustic_tokenizer.stem.conv.conv.",
-    r"^model\.acoustic_tokenizer\.encoder\.stages\.0\.":                           r"acoustic_tokenizer.stem.stage.",
-    r"^model\.acoustic_tokenizer\.encoder\.downsample_layers\.(\d+)\.0\.conv\.":   r"acoustic_tokenizer.conv_layers.PLACEHOLDER.conv.conv.",
-    r"^model\.acoustic_tokenizer\.encoder\.stages\.(\d+)\.":                       r"acoustic_tokenizer.conv_layers.PLACEHOLDER.stage.",
-    r"^model\.acoustic_tokenizer\.encoder\.head\.conv\.":                          r"acoustic_tokenizer.head.",
-    r"^model\.semantic_tokenizer\.encoder\.downsample_layers\.0\.0\.conv\.":       r"semantic_tokenizer.stem.conv.conv.",
-    r"^model\.semantic_tokenizer\.encoder\.stages\.0\.":                           r"semantic_tokenizer.stem.stage.",
-    r"^model\.semantic_tokenizer\.encoder\.downsample_layers\.(\d+)\.0\.conv\.":   r"semantic_tokenizer.conv_layers.PLACEHOLDER.conv.conv.",
-    r"^model\.semantic_tokenizer\.encoder\.stages\.(\d+)\.":                       r"semantic_tokenizer.conv_layers.PLACEHOLDER.stage.",
-    r"^model\.semantic_tokenizer\.encoder\.head\.conv\.":                          r"semantic_tokenizer.head.",
+    r"^model\.acoustic_tokenizer\.encoder\.downsample_layers\.0\.0\.conv\.":       r"acoustic_tokenizer_encoder.stem.conv.conv.",
+    r"^model\.acoustic_tokenizer\.encoder\.stages\.0\.":                           r"acoustic_tokenizer_encoder.stem.stage.",
+    r"^model\.acoustic_tokenizer\.encoder\.downsample_layers\.(\d+)\.0\.conv\.":   r"acoustic_tokenizer_encoder.conv_layers.PLACEHOLDER.conv.conv.",
+    r"^model\.acoustic_tokenizer\.encoder\.stages\.(\d+)\.":                       r"acoustic_tokenizer_encoder.conv_layers.PLACEHOLDER.stage.",
+    r"^model\.acoustic_tokenizer\.encoder\.head\.conv\.":                          r"acoustic_tokenizer_encoder.head.",
+    r"^model\.semantic_tokenizer\.encoder\.downsample_layers\.0\.0\.conv\.":       r"semantic_tokenizer_encoder.stem.conv.conv.",
+    r"^model\.semantic_tokenizer\.encoder\.stages\.0\.":                           r"semantic_tokenizer_encoder.stem.stage.",
+    r"^model\.semantic_tokenizer\.encoder\.downsample_layers\.(\d+)\.0\.conv\.":   r"semantic_tokenizer_encoder.conv_layers.PLACEHOLDER.conv.conv.",
+    r"^model\.semantic_tokenizer\.encoder\.stages\.(\d+)\.":                       r"semantic_tokenizer_encoder.conv_layers.PLACEHOLDER.stage.",
+    r"^model\.semantic_tokenizer\.encoder\.head\.conv\.":                          r"semantic_tokenizer_encoder.head.",
     # -- important! should be after above mapping
     r"mixer\.conv\.conv\.conv\.":                                                   r"mixer.conv.",
     r"\.conv\.conv\.conv\.":                                                        r".conv.conv.",
@@ -181,11 +181,10 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
         if "vae_dim" in acoustic_config_dict:
             acoustic_config_dict["hidden_size"] = acoustic_config_dict.pop("vae_dim")
         if "fix_std" in acoustic_config_dict:
-            # NOTE passed to main model config
-            acoustic_vae_std = acoustic_config_dict.pop("fix_std") / 0.8
+            acoustic_config_dict["vae_std"] = acoustic_config_dict.pop("fix_std") / 0.8
         for key in config_keys_to_remove:
             acoustic_config_dict.pop(key, None)
-        acoustic_config = VibeVoiceAcousticTokenizerEncoderConfig(**acoustic_config_dict)
+        acoustic_tokenizer_encoder_config = VibeVoiceAcousticTokenizerEncoderConfig(**acoustic_config_dict)
 
         # Prepare semantic tokenizer config
         semantic_config_dict = original_config.get("semantic_tokenizer_config", {}).copy()
@@ -203,14 +202,13 @@ def create_config_from_checkpoint(checkpoint_path: str | Path) -> VibeVoiceAsrCo
             semantic_config_dict["hidden_size"] = semantic_config_dict.pop("vae_dim")
         for key in config_keys_to_remove:
             semantic_config_dict.pop(key, None)
-        semantic_config = VibeVoiceAcousticTokenizerEncoderConfig(**semantic_config_dict)
+        semantic_tokenizer_encoder_config = VibeVoiceAcousticTokenizerEncoderConfig(**semantic_config_dict)
 
         # Create main config
         config = VibeVoiceAsrConfig(
-            acoustic_tokenizer_config=acoustic_config,
-            semantic_tokenizer_config=semantic_config,
+            acoustic_tokenizer_encoder_config=acoustic_tokenizer_encoder_config,
+            semantic_tokenizer_encoder_config=semantic_tokenizer_encoder_config,
             text_config=Qwen2Config(**original_config.get("decoder_config", {})),
-            acoustic_vae_std=acoustic_vae_std,
         )
     else:
         logger.warning("No config.json found, using default configuration")
