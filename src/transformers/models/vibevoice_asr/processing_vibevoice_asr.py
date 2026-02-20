@@ -273,16 +273,14 @@ class VibeVoiceAsrProcessor(ProcessorMixin):
         if return_format not in return_types:
             raise ValueError(f"return_format must be one of {return_types}.")
         if return_format != "raw":
-            skip_special_tokens = True
-        else:
-            skip_special_tokens = kwargs.get("skip_special_tokens", False)
+            kwargs["skip_special_tokens"] = True  # for other formats this does not make sense, we can silently ignore
 
-        decoded = self.tokenizer.decode(*args, skip_special_tokens=skip_special_tokens, **kwargs)
+        decoded = self.tokenizer.decode(*args, **kwargs)
 
-        if return_format != "raw":
-            decoded = [self._parse_dict_output(text) for text in decoded]
+        if return_format in ["parsed", "transcription_only"]:
+            decoded = [self._parse_dict_output(el) for el in decoded]
         if return_format == "transcription_only":
-            return [self._extract_content_from_dict(dict_output) for dict_output in decoded]
+            return [self._extract_content_from_dict(el) for el in decoded]
         else:
             return decoded
 
