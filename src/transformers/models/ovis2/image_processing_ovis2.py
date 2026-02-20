@@ -1,4 +1,3 @@
-# coding=utf-8
 # Copyright 2025 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,7 +13,6 @@
 # limitations under the License.
 
 from functools import lru_cache
-from typing import Optional, Union
 
 import numpy as np
 
@@ -44,7 +42,7 @@ if is_vision_available():
 logger = logging.get_logger(__name__)
 
 
-class Ovis2ImageProcessorKwargs(ImagesKwargs):
+class Ovis2ImageProcessorKwargs(ImagesKwargs, total=False):
     """
     crop_to_patches (`bool`, *optional*, defaults to `False`):
         Whether to crop the image to patches. Can be overridden by the `crop_to_patches` parameter in the
@@ -61,10 +59,10 @@ class Ovis2ImageProcessorKwargs(ImagesKwargs):
         `preprocess` method.
     """
 
-    crop_to_patches: Optional[bool]
-    min_patches: Optional[int]
-    max_patches: Optional[int]
-    use_covering_area_grid: Optional[bool]
+    crop_to_patches: bool
+    min_patches: int
+    max_patches: int
+    use_covering_area_grid: bool
 
 
 # Similar to image_processing_mllama.get_all_supported_aspect_ratios
@@ -184,7 +182,7 @@ def get_min_tile_covering_grid(
     for tile_grid in candidate_tile_grids:
         tile_regions = split_image_into_grid(image_height, image_width, tile_grid)
         tile_covering_ratio = (
-            sum([compute_patch_covering_area(*region, target_patch_size) for region in tile_regions]) / image_area
+            sum(compute_patch_covering_area(*region, target_patch_size) for region in tile_regions) / image_area
         )
 
         evaluated_grids.append((tile_grid, tile_covering_ratio))
@@ -253,16 +251,16 @@ class Ovis2ImageProcessor(BaseImageProcessor):
     def __init__(
         self,
         do_resize: bool = True,
-        size: Optional[dict[str, int]] = None,
+        size: dict[str, int] | None = None,
         crop_to_patches: bool = False,
         min_patches: int = 1,
         max_patches: int = 12,
         resample: PILImageResampling = PILImageResampling.BICUBIC,
         do_rescale: bool = True,
-        rescale_factor: Union[int, float] = 1 / 255,
+        rescale_factor: int | float = 1 / 255,
         do_normalize: bool = True,
-        image_mean: Optional[Union[float, list[float]]] = None,
-        image_std: Optional[Union[float, list[float]]] = None,
+        image_mean: float | list[float] | None = None,
+        image_std: float | list[float] | None = None,
         do_convert_rgb: bool = True,
         use_covering_area_grid: bool = True,
         **kwargs,
@@ -289,8 +287,8 @@ class Ovis2ImageProcessor(BaseImageProcessor):
         image: np.ndarray,
         size: dict[str, int],
         resample: PILImageResampling = PILImageResampling.BICUBIC,
-        data_format: Optional[Union[str, ChannelDimension]] = None,
-        input_data_format: Optional[Union[str, ChannelDimension]] = None,
+        data_format: str | ChannelDimension | None = None,
+        input_data_format: str | ChannelDimension | None = None,
         **kwargs,
     ) -> np.ndarray:
         """
@@ -336,21 +334,21 @@ class Ovis2ImageProcessor(BaseImageProcessor):
     def preprocess(
         self,
         images: ImageInput,
-        do_resize: Optional[bool] = None,
-        size: Optional[dict[str, int]] = None,
-        crop_to_patches: Optional[bool] = None,
-        min_patches: Optional[int] = None,
-        max_patches: Optional[int] = None,
-        resample: Optional[PILImageResampling] = None,
-        do_rescale: Optional[bool] = None,
-        rescale_factor: Optional[float] = None,
-        do_normalize: Optional[bool] = None,
-        image_mean: Optional[Union[float, list[float]]] = None,
-        image_std: Optional[Union[float, list[float]]] = None,
-        return_tensors: Optional[Union[str, TensorType]] = None,
-        do_convert_rgb: Optional[bool] = None,
+        do_resize: bool | None = None,
+        size: dict[str, int] | None = None,
+        crop_to_patches: bool | None = None,
+        min_patches: int | None = None,
+        max_patches: int | None = None,
+        resample: PILImageResampling | None = None,
+        do_rescale: bool | None = None,
+        rescale_factor: float | None = None,
+        do_normalize: bool | None = None,
+        image_mean: float | list[float] | None = None,
+        image_std: float | list[float] | None = None,
+        return_tensors: str | TensorType | None = None,
+        do_convert_rgb: bool | None = None,
         data_format: ChannelDimension = ChannelDimension.FIRST,
-        input_data_format: Optional[Union[str, ChannelDimension]] = None,
+        input_data_format: str | ChannelDimension | None = None,
         use_covering_area_grid: bool = True,
     ) -> PIL.Image.Image:
         """
@@ -500,8 +498,8 @@ class Ovis2ImageProcessor(BaseImageProcessor):
         min_patches: int,
         max_patches: int,
         use_covering_area_grid: bool = True,
-        patch_size: Optional[Union[tuple, int, dict]] = None,
-        data_format: Optional[ChannelDimension] = None,
+        patch_size: tuple | int | dict | None = None,
+        data_format: ChannelDimension | None = None,
         covering_threshold: float = 0.9,
     ):
         """

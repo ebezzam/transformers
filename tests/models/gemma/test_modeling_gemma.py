@@ -16,9 +16,8 @@
 import unittest
 
 import pytest
-from packaging import version
 
-from transformers import AutoModelForCausalLM, AutoTokenizer, is_torch_available
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, is_torch_available
 from transformers.generation.configuration_utils import GenerationConfig
 from transformers.testing_utils import (
     DeviceProperties,
@@ -27,7 +26,6 @@ from transformers.testing_utils import (
     get_device_properties,
     require_bitsandbytes,
     require_flash_attn,
-    require_read_token,
     require_torch,
     require_torch_accelerator,
     slow,
@@ -42,8 +40,6 @@ if is_torch_available():
 
     from transformers import (
         GemmaForCausalLM,
-        GemmaForSequenceClassification,
-        GemmaForTokenClassification,
         GemmaModel,
     )
 
@@ -56,17 +52,6 @@ class GemmaModelTester(CausalLMModelTester):
 
 @require_torch
 class GemmaModelTest(CausalLMModelTest, unittest.TestCase):
-    pipeline_model_mapping = (
-        {
-            "feature-extraction": GemmaModel,
-            "text-classification": GemmaForSequenceClassification,
-            "token-classification": GemmaForTokenClassification,
-            "text-generation": GemmaForCausalLM,
-            "zero-shot": GemmaForSequenceClassification,
-        }
-        if is_torch_available()
-        else {}
-    )
     model_tester_class = GemmaModelTester
 
     # used in `test_torch_compile_for_training`
@@ -105,7 +90,6 @@ class GemmaIntegrationTest(unittest.TestCase):
         # See LlamaIntegrationTest.tearDown(). Can be removed once LlamaIntegrationTest.tearDown() is removed.
         cleanup(torch_device, gc_collect=True)
 
-    @require_read_token
     def test_model_2b_fp16(self):
         model_id = "google/gemma-2b"
         EXPECTED_TEXTS = [
@@ -125,7 +109,6 @@ class GemmaIntegrationTest(unittest.TestCase):
 
         self.assertEqual(output_text, EXPECTED_TEXTS)
 
-    @require_read_token
     def test_model_2b_bf16(self):
         model_id = "google/gemma-2b"
 
@@ -144,7 +127,6 @@ class GemmaIntegrationTest(unittest.TestCase):
 
         self.assertEqual(output_text, EXPECTED_TEXTS)
 
-    @require_read_token
     def test_model_2b_eager(self):
         model_id = "google/gemma-2b"
 
@@ -166,7 +148,6 @@ class GemmaIntegrationTest(unittest.TestCase):
         self.assertEqual(output_text, EXPECTED_TEXTS)
 
     @require_flash_attn
-    @require_read_token
     @pytest.mark.flash_attn_test
     def test_model_2b_flash_attn(self):
         model_id = "google/gemma-2b"
@@ -189,7 +170,6 @@ class GemmaIntegrationTest(unittest.TestCase):
         self.assertEqual(output_text, EXPECTED_TEXTS)
 
     @require_bitsandbytes
-    @require_read_token
     def test_model_2b_4bit(self):
         model_id = "google/gemma-2b"
         EXPECTED_TEXTS = [
@@ -197,7 +177,9 @@ class GemmaIntegrationTest(unittest.TestCase):
             "Hi today I'd like to share with you my experience with the new wattpad wattpad wattpad wattpad wattpad wattpad wattpad",
         ]
 
-        model = AutoModelForCausalLM.from_pretrained(model_id, load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id, quantization_config=BitsAndBytesConfig(load_in_4bit=True)
+        )
 
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         inputs = tokenizer(self.input_text, return_tensors="pt", padding=True).to(torch_device)
@@ -208,7 +190,6 @@ class GemmaIntegrationTest(unittest.TestCase):
         self.assertEqual(output_text, EXPECTED_TEXTS)
 
     @unittest.skip(reason="The test will not fit our CI runners")
-    @require_read_token
     def test_model_7b_fp32(self):
         model_id = "google/gemma-7b"
         EXPECTED_TEXTS = [
@@ -226,7 +207,6 @@ class GemmaIntegrationTest(unittest.TestCase):
 
         self.assertEqual(output_text, EXPECTED_TEXTS)
 
-    @require_read_token
     def test_model_7b_fp16(self):
         if self.device_properties[0] == "cuda" and self.device_properties[1] == 7:
             self.skipTest("This test is failing (`torch.compile` fails) on Nvidia T4 GPU (OOM).")
@@ -247,7 +227,6 @@ class GemmaIntegrationTest(unittest.TestCase):
 
         self.assertEqual(output_text, EXPECTED_TEXTS)
 
-    @require_read_token
     def test_model_7b_bf16(self):
         if self.device_properties[0] == "cuda" and self.device_properties[1] == 7:
             self.skipTest("This test is failing (`torch.compile` fails) on Nvidia T4 GPU (OOM).")
@@ -278,7 +257,6 @@ class GemmaIntegrationTest(unittest.TestCase):
         output_text = tokenizer.batch_decode(output, skip_special_tokens=True)
         self.assertEqual(output_text, expected_text)
 
-    @require_read_token
     def test_model_7b_fp16_static_cache(self):
         if self.device_properties[0] == "cuda" and self.device_properties[1] == 7:
             self.skipTest("This test is failing (`torch.compile` fails) on Nvidia T4 GPU (OOM).")
@@ -310,7 +288,6 @@ class GemmaIntegrationTest(unittest.TestCase):
         self.assertEqual(output_text, EXPECTED_TEXTS)
 
     @require_bitsandbytes
-    @require_read_token
     def test_model_7b_4bit(self):
         model_id = "google/gemma-7b"
 
@@ -328,7 +305,9 @@ class GemmaIntegrationTest(unittest.TestCase):
         )
         EXPECTED_TEXTS = expectations.get_expectation()
 
-        model = AutoModelForCausalLM.from_pretrained(model_id, load_in_4bit=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id, quantization_config=BitsAndBytesConfig(load_in_4bit=True)
+        )
 
         tokenizer = AutoTokenizer.from_pretrained(model_id)
         inputs = tokenizer(self.input_text, return_tensors="pt", padding=True).to(torch_device)
@@ -340,13 +319,7 @@ class GemmaIntegrationTest(unittest.TestCase):
     @slow
     @require_torch_accelerator
     @pytest.mark.torch_compile_test
-    @require_read_token
     def test_compile_static_cache(self):
-        # `torch==2.2` will throw an error on this test (as in other compilation tests), but torch==2.1.2 and torch>2.2
-        # work as intended. See https://github.com/pytorch/pytorch/issues/121943
-        if version.parse(torch.__version__) < version.parse("2.3.0"):
-            self.skipTest(reason="This test requires torch >= 2.3 to run.")
-
         NUM_TOKENS_TO_GENERATE = 40
         EXPECTED_TEXT_COMPLETION = [
             "Hello I am doing a project on the 1990s and I need to know what the most popular music was in the 1990s. I have looked on the internet and I have found",
@@ -380,11 +353,7 @@ class GemmaIntegrationTest(unittest.TestCase):
 
     @pytest.mark.torch_export_test
     @slow
-    @require_read_token
     def test_export_static_cache(self):
-        if version.parse(torch.__version__) < version.parse("2.3.0"):
-            self.skipTest(reason="This test requires torch >= 2.3 to run.")
-
         from transformers.integrations.executorch import (
             TorchExportableModuleWithStaticCache,
         )

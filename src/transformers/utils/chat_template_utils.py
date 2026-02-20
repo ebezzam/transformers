@@ -16,6 +16,7 @@ import inspect
 import json
 import re
 import types
+from collections.abc import Callable
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime
@@ -23,9 +24,7 @@ from functools import lru_cache
 from inspect import isfunction
 from typing import (
     Any,
-    Callable,
     Literal,
-    Optional,
     Union,
     get_args,
     get_origin,
@@ -54,6 +53,9 @@ if is_torch_available():
     from torch import Tensor
 
 
+ChatType = list[dict[str, Any]]
+
+
 BASIC_TYPES = (int, float, str, bool, Any, type(None), ...)
 # Extracts the initial segment of the docstring, containing the function description
 description_re = re.compile(r"^(.*?)[\n\s]*(Args:|Returns:|Raises:|\Z)", re.DOTALL)
@@ -76,13 +78,9 @@ returns_re = re.compile(r"\n\s*Returns:\n\s*(.*?)[\n\s]*(Raises:|\Z)", re.DOTALL
 class TypeHintParsingException(Exception):
     """Exception raised for errors in parsing type hints to generate JSON schemas"""
 
-    pass
-
 
 class DocstringParsingException(Exception):
     """Exception raised for errors in parsing docstrings to generate JSON schemas"""
-
-    pass
 
 
 def _get_json_schema_type(param_type: type) -> dict[str, str]:
@@ -183,8 +181,21 @@ def _parse_type_hint(hint: str) -> dict:
 def _convert_type_hints_to_json_schema(func: Callable) -> dict:
     type_hints = get_type_hints(func)
     signature = inspect.signature(func)
+    # For methods, we need to ignore the first "self" or "cls" parameter. Here we assume that if the first parameter
+    # is named "self" or "cls" and has no type hint, it is an implicit receiver argument.
+    first_param_name = next(iter(signature.parameters), None)
+    if (
+        first_param_name in {"self", "cls"}
+        and signature.parameters[first_param_name].annotation == inspect.Parameter.empty
+    ):
+        implicit_arg_name = first_param_name
+    else:
+        implicit_arg_name = None
+
     required = []
     for param_name, param in signature.parameters.items():
+        if param_name == implicit_arg_name:
+            continue
         if param.annotation == inspect.Parameter.empty:
             raise TypeHintParsingException(f"Argument {param.name} is missing a type hint in function {func.__name__}")
         if param.default == inspect.Parameter.empty:
@@ -192,6 +203,8 @@ def _convert_type_hints_to_json_schema(func: Callable) -> dict:
 
     properties = {}
     for param_name, param_type in type_hints.items():
+        if param_name == implicit_arg_name:
+            continue
         properties[param_name] = _parse_type_hint(param_type)
 
     schema = {"type": "object", "properties": properties}
@@ -201,7 +214,7 @@ def _convert_type_hints_to_json_schema(func: Callable) -> dict:
     return schema
 
 
-def parse_google_format_docstring(docstring: str) -> tuple[Optional[str], Optional[dict], Optional[str]]:
+def parse_google_format_docstring(docstring: str) -> tuple[str | None, dict | None, str | None]:
     """
     Parses a Google-style docstring to extract the function description,
     argument descriptions, and return description.
@@ -240,7 +253,8 @@ def get_json_schema(func: Callable) -> dict:
     mostly used for passing lists of tools to a chat template. The JSON schema contains the name and description of
     the function, as well as the names, types and descriptions for each of its arguments. `get_json_schema()` requires
     that the function has a docstring, and that each argument has a description in the docstring, in the standard
-    Google docstring format shown below. It also requires that all the function arguments have a valid Python type hint.
+    Google docstring format shown below. It also requires that all user-facing arguments have valid Python type hints.
+    When passing methods, implicit receiver arguments (`self` or `cls`) are ignored.
 
     Although it is not required, a `Returns` block can also be added, which will be included in the schema. This is
     optional because most chat templates ignore the return value of the function.
@@ -464,10 +478,10 @@ def _compile_jinja_template(chat_template):
 
 
 def render_jinja_template(
-    conversations: list[list[dict[str, str]]],
-    tools: Optional[list[Union[dict, Callable]]] = None,
-    documents: Optional[list[dict[str, str]]] = None,
-    chat_template: Optional[str] = None,
+    conversations: list[ChatType],
+    tools: list[dict | Callable] | None = None,
+    documents: ChatType | None = None,
+    chat_template: str | None = None,
     return_assistant_tokens_mask: bool = False,
     continue_final_message: bool = False,
     add_generation_prompt: bool = False,
@@ -487,7 +501,7 @@ def render_jinja_template(
         for tool in tools:
             if isinstance(tool, dict):
                 tool_schemas.append(tool)
-            elif isfunction(tool):
+            elif isfunction(tool) or inspect.ismethod(tool):
                 tool_schemas.append(get_json_schema(tool))
             else:
                 raise ValueError(
@@ -563,3 +577,26 @@ def render_jinja_template(
         rendered.append(rendered_chat)
 
     return rendered, all_generation_indices
+
+
+def is_valid_message(message):
+    """
+    Check that input is a valid message in a chat, namely a dict with "role" and "content" keys.
+    """
+    if not isinstance(message, dict):
+        return False
+    if not ("role" in message and "content" in message):
+        return False
+    return True
+
+
+class Chat:
+    """This class is intended to just be used internally for pipelines and not exposed to users. We convert chats
+    to this format because the rest of the pipeline code tends to assume that lists of messages are
+    actually a batch of samples rather than messages in the same conversation."""
+
+    def __init__(self, messages: dict):
+        for message in messages:
+            if not is_valid_message(message):
+                raise ValueError("When passing chat dicts as input, each dict must have a 'role' and 'content' key.")
+        self.messages = messages

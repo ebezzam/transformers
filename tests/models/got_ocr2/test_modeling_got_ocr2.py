@@ -149,11 +149,11 @@ class GotOcr2ModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMi
         {
             "image-to-text": GotOcr2ForConditionalGeneration,
             "image-text-to-text": GotOcr2ForConditionalGeneration,
+            "any-to-any": GotOcr2ForConditionalGeneration,
         }
         if is_torch_available()
         else {}
     )
-    test_pruning = False
 
     def setUp(self):
         self.model_tester = GotOcr2VisionText2TextModelTester(self)

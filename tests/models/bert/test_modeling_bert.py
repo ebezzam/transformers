@@ -11,12 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import inspect
-import tempfile
 import unittest
 
 import pytest
-from packaging import version
 
 from transformers import AutoTokenizer, BertConfig, is_torch_available
 from transformers.models.auto import get_values
@@ -46,7 +43,6 @@ if is_torch_available():
         BertForTokenClassification,
         BertLMHeadModel,
         BertModel,
-        DataCollatorWithFlattening,
     )
 
 
@@ -462,7 +458,6 @@ class BertModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin
         if is_torch_available()
         else {}
     )
-    fx_compatible = False  # won't be maintained
     model_split_percents = [0.5, 0.8, 0.9]
 
     # special case for ForPreTraining model
@@ -496,21 +491,6 @@ class BertModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_model(*config_and_inputs)
 
-    def test_model_various_embeddings(self):
-        config_and_inputs = self.model_tester.prepare_config_and_inputs()
-        for type in ["absolute", "relative_key", "relative_key_query"]:
-            config_and_inputs[0].position_embedding_type = type
-            config_and_inputs[0]._attn_implementation = "eager"
-            self.model_tester.create_and_check_model(*config_and_inputs)
-
-    def test_model_3d_mask_shapes(self):
-        config_and_inputs = self.model_tester.prepare_config_and_inputs()
-        # manipulate input_mask
-        config_and_inputs = list(config_and_inputs)
-        batch_size, seq_length = config_and_inputs[3].shape
-        config_and_inputs[3] = random_attention_mask([batch_size, seq_length, seq_length])
-        self.model_tester.create_and_check_model(*config_and_inputs)
-
     def test_model_as_decoder(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs_for_decoder()
         self.model_tester.create_and_check_model_as_decoder(*config_and_inputs)
@@ -542,36 +522,6 @@ class BertModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin
             encoder_attention_mask,
         )
 
-    def test_model_as_decoder_with_3d_input_mask(self):
-        (
-            config,
-            input_ids,
-            token_type_ids,
-            input_mask,
-            sequence_labels,
-            token_labels,
-            choice_labels,
-            encoder_hidden_states,
-            encoder_attention_mask,
-        ) = self.model_tester.prepare_config_and_inputs_for_decoder()
-
-        batch_size, seq_length = input_mask.shape
-        input_mask = random_attention_mask([batch_size, seq_length, seq_length])
-        batch_size, seq_length = encoder_attention_mask.shape
-        encoder_attention_mask = random_attention_mask([batch_size, seq_length, seq_length])
-
-        self.model_tester.create_and_check_model_as_decoder(
-            config,
-            input_ids,
-            token_type_ids,
-            input_mask,
-            sequence_labels,
-            token_labels,
-            choice_labels,
-            encoder_hidden_states,
-            encoder_attention_mask,
-        )
-
     def test_for_causal_lm(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs_for_decoder()
         self.model_tester.create_and_check_for_causal_lm(*config_and_inputs)
@@ -586,12 +536,6 @@ class BertModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin
 
     def test_decoder_model_past_with_large_inputs(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs_for_decoder()
-        self.model_tester.create_and_check_decoder_model_past_large_inputs(*config_and_inputs)
-
-    def test_decoder_model_past_with_large_inputs_relative_pos_emb(self):
-        config_and_inputs = self.model_tester.prepare_config_and_inputs_for_decoder()
-        config_and_inputs[0].position_embedding_type = "relative_key"
-        config_and_inputs[0]._attn_implementation = "eager"
         self.model_tester.create_and_check_decoder_model_past_large_inputs(*config_and_inputs)
 
     def test_for_multiple_choice(self):
@@ -624,120 +568,6 @@ class BertModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin
         model = BertModel.from_pretrained(model_name)
         self.assertIsNotNone(model)
 
-    def attention_mask_padding_matches_padding_free_with_position_ids(
-        self, attn_implementation: str, fa_kwargs: bool = False
-    ):
-        """
-        Overwritten to account for the embeddings that rely on position ids.
-        """
-        if not self.has_attentions:
-            self.skipTest(reason="Model architecture does not support attentions")
-
-        max_new_tokens = 30
-        support_flag = {
-            "sdpa": "_supports_sdpa",
-            "flash_attention_2": "_supports_flash_attn",
-            "flash_attention_3": "_supports_flash_attn",
-        }
-
-        for model_class in self.all_generative_model_classes:
-            if attn_implementation != "eager" and not getattr(model_class, support_flag[attn_implementation]):
-                self.skipTest(f"{model_class.__name__} does not support {attn_implementation}")
-
-            # can't infer if new attn mask API is supported by assume that only model with attention backend support it
-            if not model_class._supports_attention_backend:
-                self.skipTest(f"{model_class.__name__} does not support new attention mask API")
-
-            if model_class._is_stateful:  # non-transformer models most probably have no packing support
-                self.skipTest(f"{model_class.__name__} doesn't support packing!")
-
-            config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
-            if config.is_encoder_decoder:
-                self.skipTest("Model is an encoder-decoder")
-
-            if 0 not in inputs_dict.get("attention_mask", []) or "attention_mask" not in inputs_dict:
-                self.skipTest("Model dummy inputs should contain padding in their attention mask")
-
-            if "input_ids" not in inputs_dict or inputs_dict["input_ids"].ndim != 2:
-                self.skipTest("Model dummy inputs should contain text input ids")
-
-            # make sure that all models have enough positions for generation
-            dummy_input_ids = inputs_dict["input_ids"]
-            if hasattr(config, "max_position_embeddings"):
-                config.max_position_embeddings = max_new_tokens + dummy_input_ids.shape[1] + 1
-
-            model = model_class(config)
-            if "position_ids" not in inspect.signature(model.forward).parameters:
-                self.skipTest("Model does not support position_ids")
-
-            if (not fa_kwargs) and "position_ids" not in inspect.signature(model.forward).parameters:
-                continue  # this model doesn't accept position ids as input
-
-            with tempfile.TemporaryDirectory() as tmpdirname:
-                model.save_pretrained(tmpdirname)
-
-                # Drop all keys except for the minimal set. Hard to manipulate with multimodals etc
-                inputs_dict = {k: v for k, v in inputs_dict.items() if k in ["input_ids", "attention_mask"]}
-
-                # Ensure left padding, to adapt for some models
-                if 0 in inputs_dict["attention_mask"][:, -1]:
-                    inputs_dict["attention_mask"] = inputs_dict["attention_mask"].flip(1)
-                dummy_attention_mask = inputs_dict["attention_mask"]
-                dummy_input_ids[~dummy_attention_mask.bool()] = config.get_text_config().pad_token_id
-
-                # Main difference to other models, we need to prepare position ids according to the attention mask
-                # as we use it to extract embeddings that rely on the correct position - naively increasing sequences do
-                # not suffice anymore atp. The solution here calculates an increasing sequences for all 1s and puts 0s else.
-                inputs_dict["position_ids"] = ((inputs_dict["attention_mask"] == 1).long().cumsum(dim=1) - 1) * (
-                    inputs_dict["attention_mask"] == 1
-                ).long()
-
-                model = (
-                    model_class.from_pretrained(
-                        tmpdirname,
-                        dtype=torch.bfloat16,
-                        attn_implementation=attn_implementation,
-                    )
-                    .to(torch_device)
-                    .eval()
-                )
-
-                if fa_kwargs:
-                    # flatten
-                    features = [
-                        {"input_ids": i[a.bool()].tolist()} for i, a in zip(dummy_input_ids, dummy_attention_mask)
-                    ]
-
-                    # add position_ids + fa_kwargs
-                    data_collator = DataCollatorWithFlattening(return_tensors="pt", return_flash_attn_kwargs=True)
-                    batch = data_collator(features)
-                    padfree_inputs_dict = {
-                        k: t.to(torch_device) if torch.is_tensor(t) else t for k, t in batch.items()
-                    }
-                else:
-                    # create packed position_ids
-                    position_ids = (
-                        torch.cat([torch.arange(length) for length in dummy_attention_mask.sum(1).tolist()])
-                        .long()
-                        .unsqueeze(0)
-                        .to(torch_device)
-                    )
-                    padfree_inputs_dict = {
-                        "input_ids": dummy_input_ids[dummy_attention_mask.bool()].unsqueeze(0),
-                        "position_ids": position_ids,
-                    }
-
-                # We need to do simple forward without cache in order to trigger packed SDPA/flex/eager attention path
-                res_padded = model(**inputs_dict, use_cache=False)
-                res_padfree = model(**padfree_inputs_dict, use_cache=False)
-
-                logits_padded = res_padded.logits[dummy_attention_mask.bool()]
-                logits_padfree = res_padfree.logits[0]
-
-                # acceptable numerical instability
-                tol = torch.finfo(torch.bfloat16).eps
-                torch.testing.assert_close(logits_padded, logits_padfree, rtol=tol, atol=tol)
-
 
 @require_torch
 class BertModelIntegrationTest(unittest.TestCase):
@@ -755,45 +585,8 @@ class BertModelIntegrationTest(unittest.TestCase):
         torch.testing.assert_close(output[:, 1:4, 1:4], expected_slice, rtol=1e-4, atol=1e-4)
 
     @slow
-    def test_inference_no_head_relative_embedding_key(self):
-        model = BertModel.from_pretrained(
-            "zhiheng-huang/bert-base-uncased-embedding-relative-key", attn_implementation="eager"
-        )
-        input_ids = torch.tensor([[0, 345, 232, 328, 740, 140, 1695, 69, 6078, 1588, 2]])
-        attention_mask = torch.tensor([[0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]])
-        with torch.no_grad():
-            output = model(input_ids, attention_mask=attention_mask)[0]
-        expected_shape = torch.Size((1, 11, 768))
-        self.assertEqual(output.shape, expected_shape)
-        expected_slice = torch.tensor(
-            [[[0.0756, 0.3142, -0.5128], [0.3761, 0.3462, -0.5477], [0.2052, 0.3760, -0.1240]]]
-        )
-
-        torch.testing.assert_close(output[:, 1:4, 1:4], expected_slice, rtol=1e-4, atol=1e-4)
-
-    @slow
-    def test_inference_no_head_relative_embedding_key_query(self):
-        model = BertModel.from_pretrained(
-            "zhiheng-huang/bert-base-uncased-embedding-relative-key-query", attn_implementation="eager"
-        )
-        input_ids = torch.tensor([[0, 345, 232, 328, 740, 140, 1695, 69, 6078, 1588, 2]])
-        attention_mask = torch.tensor([[0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]])
-        with torch.no_grad():
-            output = model(input_ids, attention_mask=attention_mask)[0]
-        expected_shape = torch.Size((1, 11, 768))
-        self.assertEqual(output.shape, expected_shape)
-        expected_slice = torch.tensor(
-            [[[0.6496, 0.3784, 0.8203], [0.8148, 0.5656, 0.2636], [-0.0681, 0.5597, 0.7045]]]
-        )
-
-        torch.testing.assert_close(output[:, 1:4, 1:4], expected_slice, rtol=1e-4, atol=1e-4)
-
-    @slow
     @pytest.mark.torch_export_test
     def test_export(self):
-        if version.parse(torch.__version__) < version.parse("2.4.0"):
-            self.skipTest(reason="This test requires torch >= 2.4 to run.")
-
         bert_model = "google-bert/bert-base-uncased"
         device = "cpu"
         attn_implementation = "sdpa"

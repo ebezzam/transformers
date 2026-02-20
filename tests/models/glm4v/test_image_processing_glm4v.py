@@ -131,7 +131,7 @@ class Glm4vImageProcessingTester:
 
 @require_torch
 @require_vision
-class ViTImageProcessingTest(ImageProcessingTestMixin, unittest.TestCase):
+class Glm4vImageProcessingTest(ImageProcessingTestMixin, unittest.TestCase):
     image_processing_class = Glm4vImageProcessor if is_vision_available() else None
     fast_image_processing_class = Glm4vImageProcessorFast if is_torchvision_available() else None
 
@@ -236,8 +236,8 @@ class ViTImageProcessingTest(ImageProcessingTestMixin, unittest.TestCase):
                 image_inputs[0],
                 return_tensors="pt",
                 input_data_format="channels_last",
-                image_mean=0,
-                image_std=1,
+                image_mean=(0.0, 0.0, 0.0, 0.0),
+                image_std=(1.0, 1.0, 1.0, 1.0),
             ).pixel_values
             expected_output_image_shape = self.image_processor_tester.expected_output_image_shape([image_inputs[0]])
             self.assertEqual(tuple(encoded_images.shape), expected_output_image_shape)
@@ -247,8 +247,8 @@ class ViTImageProcessingTest(ImageProcessingTestMixin, unittest.TestCase):
                 image_inputs,
                 return_tensors="pt",
                 input_data_format="channels_last",
-                image_mean=0,
-                image_std=1,
+                image_mean=(0.0, 0.0, 0.0, 0.0),
+                image_std=(1.0, 1.0, 1.0, 1.0),
             ).pixel_values
             expected_output_image_shape = self.image_processor_tester.expected_output_image_shape(image_inputs)
             self.assertEqual(tuple(encoded_images.shape), expected_output_image_shape)

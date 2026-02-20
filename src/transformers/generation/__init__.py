@@ -67,6 +67,7 @@ else:
         "SuppressTokensAtBeginLogitsProcessor",
         "SynthIDTextWatermarkLogitsProcessor",
         "TemperatureLogitsWarper",
+        "TopHLogitsWarper",
         "TopKLogitsWarper",
         "TopPLogitsWarper",
         "TypicalLogitsWarper",
@@ -85,7 +86,11 @@ else:
         "StopStringCriteria",
     ]
     _import_structure["continuous_batching"] = [
+        "ContinuousBatchingManager",
         "ContinuousMixin",
+        "FIFOScheduler",
+        "PrefillFirstScheduler",
+        "Scheduler",
     ]
     _import_structure["utils"] = [
         "GenerationMixin",
@@ -126,7 +131,13 @@ if TYPE_CHECKING:
             EarlyExitCandidateGenerator,
             PromptLookupCandidateGenerator,
         )
-        from .continuous_batching import ContinuousMixin
+        from .continuous_batching import (
+            ContinuousBatchingManager,
+            ContinuousMixin,
+            FIFOScheduler,
+            PrefillFirstScheduler,
+            Scheduler,
+        )
         from .logits_process import (
             AlternatingCodebooksLogitsProcessor,
             ClassifierFreeGuidanceLogitsProcessor,
@@ -153,6 +164,7 @@ if TYPE_CHECKING:
             SuppressTokensLogitsProcessor,
             SynthIDTextWatermarkLogitsProcessor,
             TemperatureLogitsWarper,
+            TopHLogitsWarper,
             TopKLogitsWarper,
             TopPLogitsWarper,
             TypicalLogitsWarper,

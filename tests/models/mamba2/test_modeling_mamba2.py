@@ -18,7 +18,6 @@ import unittest
 from transformers import AutoTokenizer, Mamba2Config, is_torch_available
 from transformers.testing_utils import (
     Expectations,
-    require_read_token,
     require_torch,
     require_torch_accelerator,
     slow,
@@ -118,9 +117,6 @@ class Mamba2ModelTester:
         self.eos_token_id = vocab_size - 1
         self.pad_token_id = vocab_size - 1
         self.tie_word_embeddings = tie_word_embeddings
-
-    def get_large_model_config(self):
-        return Mamba2Config.from_pretrained("mistralai/Mamba-Codestral-7B-v0.1")
 
     def prepare_config_and_inputs(
         self, gradient_checkpointing=False, scale_attn_by_inverse_layer_idx=False, reorder_and_upcast_attn=False
@@ -241,10 +237,7 @@ class Mamba2ModelTester:
 class Mamba2ModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_model_classes = (Mamba2Model, Mamba2ForCausalLM) if is_torch_available() else ()
     has_attentions = False  # Mamba does not support attentions
-    fx_compatible = False  # FIXME let's try to support this @molbap
-    test_torchscript = False  # FIXME I think this should be doable @molbap @ArthurZucker
     test_missing_keys = False
-    test_pruning = False
 
     pipeline_model_mapping = (
         {"feature-extraction": Mamba2Model, "text-generation": Mamba2ForCausalLM} if is_torch_available() else {}
@@ -255,6 +248,21 @@ class Mamba2ModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMix
         self.config_tester = Mamba2ConfigTester(
             self, config_class=Mamba2Config, n_embd=37, common_properties=["hidden_size", "num_hidden_layers"]
         )
+
+    def _check_past_key_values_for_generate(self, batch_size, past_key_values, seq_length, config):
+        self.assertIsInstance(past_key_values, Mamba2Cache)
+
+        intermediate_size = config.expand * config.hidden_size
+        conv_shape = (
+            config.num_hidden_layers,
+            batch_size,
+            intermediate_size + 2 * config.n_groups * config.state_size,
+            config.conv_kernel,
+        )
+        ssm_shape = (config.num_hidden_layers, batch_size, config.num_heads, config.head_dim, config.state_size)
+
+        self.assertEqual(past_key_values.conv_states.shape, conv_shape)
+        self.assertEqual(past_key_values.ssm_states.shape, ssm_shape)
 
     def test_mamba2_caching(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
@@ -332,17 +340,35 @@ class Mamba2ModelTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMix
             dict_inputs = self._prepare_for_class(inputs_dict, model_class, return_labels=True)
             check_equivalence(model, tuple_inputs, dict_inputs, {"output_hidden_states": True})
 
+    def test_tied_weight_embeddings(self):
+        """Regression test for https://github.com/huggingface/transformers/issues/43206."""
+        config = self.model_tester.get_config()
+
+        config.tie_word_embeddings = True
+        model = Mamba2ForCausalLM(config)
+
+        self.assertEqual(
+            model.lm_head.weight.data_ptr(),
+            model.backbone.embeddings.weight.data_ptr(),
+        )
+
+        config.tie_word_embeddings = False
+        model = Mamba2ForCausalLM(config)
+
+        self.assertNotEqual(
+            model.lm_head.weight.data_ptr(),
+            model.backbone.embeddings.weight.data_ptr(),
+        )
+
 
 @require_torch
 @slow
-@require_read_token
 class Mamba2IntegrationTest(unittest.TestCase):
     def setUp(self):
         self.model_id = "mistralai/Mamba-Codestral-7B-v0.1"
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, from_slow=True, legacy=False)
         self.prompt = ("[INST]Write a hello world program in C++.",)
 
-    @require_read_token
     @slow
     @require_torch
     def test_simple_generate(self):
@@ -372,7 +398,6 @@ class Mamba2IntegrationTest(unittest.TestCase):
         ground_truth_sentence = ground_truth_sentences.get_expectation()
         self.assertEqual(output_sentence, ground_truth_sentence)
 
-    @require_read_token
     @slow
     @require_torch_accelerator
     def test_batched_equivalence_with_cache(self):
@@ -403,7 +428,6 @@ class Mamba2IntegrationTest(unittest.TestCase):
             individual_output = tokenizer.batch_decode(individual_gen, skip_special_tokens=True)[0]
             self.assertEqual(individual_output[:100], batched_output[index_gen][:100])
 
-    @require_read_token
     @slow
     @require_torch_accelerator
     def test_batched_equivalence_without_cache(self):

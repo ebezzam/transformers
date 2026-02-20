@@ -29,7 +29,7 @@ from transformers import (
     MusicgenConfig,
     MusicgenDecoderConfig,
     MusicgenProcessor,
-    PretrainedConfig,
+    PreTrainedConfig,
     T5Config,
 )
 from transformers.testing_utils import (
@@ -40,7 +40,6 @@ from transformers.testing_utils import (
     require_torch,
     require_torch_accelerator,
     require_torch_fp16,
-    require_torch_gpu,
     slow,
     torch_device,
 )
@@ -67,7 +66,7 @@ def _config_zero_init(config):
     for key in configs_no_init.__dict__:
         if "_range" in key or "_std" in key or "initializer_factor" in key or "layer_scale" in key:
             setattr(configs_no_init, key, 1e-10)
-        if isinstance(getattr(configs_no_init, key, None), PretrainedConfig):
+        if isinstance(getattr(configs_no_init, key, None), PreTrainedConfig):
             no_init_subconfig = _config_zero_init(getattr(configs_no_init, key))
             setattr(configs_no_init, key, no_init_subconfig)
     return configs_no_init
@@ -174,7 +173,7 @@ class MusicgenDecoderTest(ModelTesterMixin, GenerationTesterMixin, PipelineTeste
         (MusicgenForCausalLM,) if is_torch_available() else ()
     )  # we don't want to run all the generation tests, only a specific subset
     pipeline_model_mapping = {}
-    test_pruning = False
+
     test_resize_embeddings = False
 
     def setUp(self):
@@ -242,7 +241,7 @@ class MusicgenDecoderTest(ModelTesterMixin, GenerationTesterMixin, PipelineTeste
             input_ids = input_ids.reshape(-1, config.num_codebooks, input_ids.shape[-1])
 
             inputs["inputs_embeds"] = sum(
-                [embed_tokens[codebook](input_ids[:, codebook]) for codebook in range(config.num_codebooks)]
+                embed_tokens[codebook](input_ids[:, codebook]) for codebook in range(config.num_codebooks)
             )
 
             with torch.no_grad():
@@ -268,10 +267,6 @@ class MusicgenDecoderTest(ModelTesterMixin, GenerationTesterMixin, PipelineTeste
         pass
 
     @unittest.skip(reason="MusicGen has multiple inputs embeds and lm heads that should not be tied")
-    def test_tie_model_weights(self):
-        pass
-
-    @unittest.skip(reason="MusicGen has multiple inputs embeds and lm heads that should not be tied")
     def test_tied_weights_keys(self):
         pass
 
@@ -286,7 +281,7 @@ class MusicgenDecoderTest(ModelTesterMixin, GenerationTesterMixin, PipelineTeste
         self.model_tester.audio_channels = original_audio_channels
 
     @require_flash_attn
-    @require_torch_gpu
+    @require_torch_accelerator
     @mark.flash_attn_test
     @slow
     # Copied from tests.test_modeling_common.ModelTesterMixin.test_flash_attn_2_inference_equivalence
@@ -366,7 +361,7 @@ class MusicgenDecoderTest(ModelTesterMixin, GenerationTesterMixin, PipelineTeste
                 _ = model_fa(dummy_input, **other_inputs)
 
     @require_flash_attn
-    @require_torch_gpu
+    @require_torch_accelerator
     @mark.flash_attn_test
     @slow
     # Copied from tests.test_modeling_common.ModelTesterMixin.test_flash_attn_2_inference_equivalence_right_padding
@@ -555,7 +550,7 @@ class MusicgenTester:
             tie_word_embeddings=False,
             audio_channels=self.audio_channels,
         )
-        config = MusicgenConfig.from_sub_models_config(text_encoder_config, audio_encoder_config, decoder_config)
+        config = MusicgenConfig(text_encoder_config, audio_encoder_config, decoder_config)
         return config
 
     def prepare_config_and_inputs_for_common(self):
@@ -572,11 +567,8 @@ class MusicgenTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin,
     pipeline_model_mapping = {"text-to-audio": MusicgenForConditionalGeneration} if is_torch_available() else {}
     # Addition keys that are required for forward. MusicGen isn't encoder-decoder in config so we have to pass decoder ids as additional
     additional_model_inputs = ["decoder_input_ids"]
-    test_pruning = False  # training is not supported yet for MusicGen
+    # training is not supported yet for MusicGen
     test_resize_embeddings = False
-    # not to test torchscript as the model tester doesn't prepare `input_values` and `padding_mask`
-    # (and `torchscript` hates `None` values).
-    test_torchscript = False
     _is_composite = True
 
     def setUp(self):
@@ -705,9 +697,11 @@ class MusicgenTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin,
                 decoder_attention_mask=decoder_attention_mask,
                 **kwargs,
             )
-        self.assertTrue(
-            all(key not in outputs for key in ["encoder_attentions", "decoder_attentions", "cross_attentions"])
-        )
+
+        # in #43702, we introduced output_attentions/ hidden_states propagation to sub-configs
+        # self.assertTrue(
+        #     all(key not in outputs for key in ["encoder_attentions", "decoder_attentions", "cross_attentions"])
+        # )
         config.text_encoder.output_attentions = True  # inner model config -> will work
         config.audio_encoder.output_attentions = True
         config.decoder.output_attentions = True
@@ -771,10 +765,6 @@ class MusicgenTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin,
             config.decoder.gradient_checkpointing = True
             model = model_class(config)
             self.assertTrue(model.is_gradient_checkpointing)
-
-    @unittest.skip(reason="MusicGen has multiple inputs embeds and lm heads that should not be tied.")
-    def test_tie_model_weights(self):
-        pass
 
     @unittest.skip(reason="MusicGen has multiple inputs embeds and lm heads that should not be tied")
     def test_tied_weights_keys(self):
@@ -910,7 +900,7 @@ class MusicgenTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin,
         self.model_tester.audio_channels = original_audio_channels
 
     @require_flash_attn
-    @require_torch_gpu
+    @require_torch_accelerator
     @mark.flash_attn_test
     @slow
     def test_flash_attn_2_conversion(self):
@@ -1170,7 +1160,7 @@ class MusicgenIntegrationTests(unittest.TestCase):
         unconditional_inputs = model.get_unconditional_inputs(num_samples=2)
         unconditional_inputs = place_dict_on_device(unconditional_inputs, device=torch_device)
 
-        set_seed(0)
+        set_seed(42)
         output_values = model.generate(**unconditional_inputs, do_sample=True, max_new_tokens=10)
 
         # fmt: off
@@ -1251,7 +1241,7 @@ class MusicgenIntegrationTests(unittest.TestCase):
         input_ids = inputs.input_ids.to(torch_device)
         attention_mask = inputs.attention_mask.to(torch_device)
 
-        set_seed(0)
+        set_seed(42)
         output_values = model.generate(
             input_ids, attention_mask=attention_mask, do_sample=True, guidance_scale=None, max_new_tokens=10
         )

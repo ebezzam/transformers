@@ -179,7 +179,7 @@ deepspeed --num_gpus=2 your_program.py <normal cl args> --deepspeed ds_config.js
 deepspeed examples/pytorch/translation/run_translation.py \
 --deepspeed tests/deepspeed/ds_config_zero3.json \
 --model_name_or_path google-t5/t5-small --per_device_train_batch_size 1 \
---output_dir output_dir --overwrite_output_dir --fp16 \
+--output_dir output_dir --fp16 \
 --do_train --max_train_samples 500 --num_train_epochs 1 \
 --dataset_name wmt16 --dataset_config "ro-en" \
 --source_lang en --target_lang ro
@@ -202,7 +202,7 @@ deepspeed examples/pytorch/translation/run_translation.py \
 deepspeed --num_gpus=1 examples/pytorch/translation/run_translation.py \
 --deepspeed tests/deepspeed/ds_config_zero2.json \
 --model_name_or_path google-t5/t5-small --per_device_train_batch_size 1 \
---output_dir output_dir --overwrite_output_dir --fp16 \
+--output_dir output_dir --fp16 \
 --do_train --max_train_samples 500 --num_train_epochs 1 \
 --dataset_name wmt16 --dataset_config "ro-en" \
 --source_lang en --target_lang ro
@@ -1206,7 +1206,7 @@ DeepSpeed支持`LRRangeTest`、`OneCycle`、`WarmupLR`和`WarmupDecayLR`学习�
 - 通过 `--lr_scheduler_type constant_with_warmup` 实现 `WarmupLR`
 - 通过 `--lr_scheduler_type linear` 实现 `WarmupDecayLR`。这也是 `--lr_scheduler_type` 的默认值，因此，如果不配置调度器，这将是默认配置的调度器。
 
-如果在配置文件中不配置 `scheduler` 条目，[`Trainer`] 将使用 `--lr_scheduler_type`、`--learning_rate` 和 `--warmup_steps` 或 `--warmup_ratio` 的值来配置其🤗 Transformers 版本。
+如果在配置文件中不配置 `scheduler` 条目，[`Trainer`] 将使用 `--lr_scheduler_type`、`--learning_rate` 和 `--warmup_steps` 的值来配置其🤗 Transformers 版本。
 
 以下是 `WarmupLR` 的自动配置示例：
 
@@ -1227,7 +1227,7 @@ DeepSpeed支持`LRRangeTest`、`OneCycle`、`WarmupLR`和`WarmupDecayLR`学习�
 
 - `warmup_min_lr` 的值为 `0`。
 - `warmup_max_lr` 的值为 `--learning_rate`。
-- `warmup_num_steps` 的值为 `--warmup_steps`（如果提供）。否则，将使用 `--warmup_ratio` 乘以训练步骤的数量，并四舍五入。
+- `warmup_num_steps` 的值为 `--warmup_steps`（如果提供）。
 - `total_num_steps` 的值为 `--max_steps` 或者如果没有提供，将在运行时根据环境、数据集的大小和其他命令行参数（对于 `WarmupDecayLR` 来说需要）自动推导。
 
 当然，您可以接管任何或所有的配置值，并自行设置这些值：
@@ -1310,9 +1310,9 @@ DeepSpeed支持完整的fp32和fp16混合精度。
 }
 ```
 
-并且，[`Trainer`]将根据`args.fp16_backend`的值自动启用或禁用它。其余的配置值由您决定。
+[`Trainer`]将根据`fp16`或`fp16_full_eval`的值自动启用或禁用它。其余的配置值由您决定。
 
-当传递`--fp16 --fp16_backend amp`或`--fp16_full_eval`命令行参数时，此模式将被启用。
+当传递`--fp16`或`--fp16_full_eval`命令行参数时，此模式将被启用。
 
 您也可以显式地启用/禁用此模式：
 
@@ -1659,7 +1659,7 @@ deepspeed examples/pytorch/translation/run_translation.py \
 --model_name_or_path google-t5/t5-small --output_dir output_dir \
 --do_eval --max_eval_samples 50 --warmup_steps 50  \
 --max_source_length 128 --val_max_target_length 128 \
---overwrite_output_dir --per_device_eval_batch_size 4 \
+--per_device_eval_batch_size 4 \
 --predict_with_generate --dataset_config "ro-en" --fp16 \
 --source_lang en --target_lang ro --dataset_name wmt16 \
 --source_prefix "translate English to Romanian: "

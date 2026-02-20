@@ -199,7 +199,6 @@ CLIP을 시작하는 데 도움이 되는 Hugging Face와 community 자료 목�
 ## CLIPConfig[[transformers.CLIPConfig]]
 
 [[autodoc]] CLIPConfig
-    - from_text_vision_configs
 
 ## CLIPTextConfig[[transformers.CLIPTextConfig]]
 
@@ -212,9 +211,7 @@ CLIP을 시작하는 데 도움이 되는 Hugging Face와 community 자료 목�
 ## CLIPTokenizer[[transformers.CLIPTokenizer]]
 
 [[autodoc]] CLIPTokenizer
-    - build_inputs_with_special_tokens
     - get_special_tokens_mask
-    - create_token_type_ids_from_sequences
     - save_vocabulary
 
 ## CLIPTokenizerFast[[transformers.CLIPTokenizerFast]]

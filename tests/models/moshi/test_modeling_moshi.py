@@ -25,7 +25,7 @@ from parameterized import parameterized
 
 from transformers import (
     MoshiConfig,
-    PretrainedConfig,
+    PreTrainedConfig,
 )
 from transformers.integrations.deepspeed import (
     is_deepspeed_available,
@@ -71,7 +71,7 @@ def _config_zero_init(config):
     for key in configs_no_init.__dict__:
         if "_range" in key or "_std" in key or "initializer_factor" in key or "layer_scale" in key:
             setattr(configs_no_init, key, 1e-10)
-        if isinstance(getattr(configs_no_init, key, None), PretrainedConfig):
+        if isinstance(getattr(configs_no_init, key, None), PreTrainedConfig):
             no_init_subconfig = _config_zero_init(getattr(configs_no_init, key))
             setattr(configs_no_init, key, no_init_subconfig)
     return configs_no_init
@@ -155,7 +155,7 @@ class MoshiDecoderTester:
 @require_torch
 class MoshiDecoderTest(ModelTesterMixin, GenerationTesterMixin, PipelineTesterMixin, unittest.TestCase):
     all_model_classes = (MoshiModel, MoshiForCausalLM) if is_torch_available() else ()
-    test_pruning = False
+
     test_resize_embeddings = True
     pipeline_model_mapping = (
         {
@@ -531,9 +531,8 @@ class MoshiTester:
 @require_torch
 class MoshiTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
     all_model_classes = (MoshiForConditionalGeneration,) if is_torch_available() else ()
-    test_pruning = False  # training is not supported yet for Moshi
+    # training is not supported yet for Moshi
     test_resize_embeddings = False
-    test_torchscript = False
 
     def setUp(self):
         self.model_tester = MoshiTester(self)
@@ -584,18 +583,6 @@ class MoshiTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
 
     @unittest.skip(reason="Continuing from past key values is not straightforward as we're dealing with 3 inputs")
     def test_generate_continue_from_past_key_values(self):
-        pass
-
-    @unittest.skip(
-        "Moshi either needs default generation config or fix for fullgraph compile because it hardcodes SlidingWindowCache in custom generation loop."
-    )
-    def test_greedy_generate_dict_outputs_use_cache(self):
-        pass
-
-    @unittest.skip(
-        "Moshi either needs default generation config or fix for fullgraph compile because it hardcodes SlidingWindowCache in custom generation loop."
-    )
-    def test_beam_search_generate_dict_outputs_use_cache(self):
         pass
 
     @parameterized.expand(TEST_EAGER_MATCHES_SDPA_INFERENCE_PARAMETERIZATION)
@@ -726,17 +713,17 @@ class MoshiTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
             print(output_ids_generate)
             self.assertIsNotNone(output_ids_generate)
 
-    @unittest.skip(reason="The audio encoder has no gradients.")
+    @pytest.mark.xfail(reason="This architecture seems to not compute gradients for some layer.")
     def test_training_gradient_checkpointing(self):
-        pass
+        super().test_training_gradient_checkpointing()
 
-    @unittest.skip(reason="The audio encoder has no gradients.")
-    def test_training_gradient_checkpointing_use_reentrant(self):
-        pass
-
-    @unittest.skip(reason="The audio encoder has no gradients.")
+    @pytest.mark.xfail(reason="This architecture seems to not compute gradients for some layer.")
     def test_training_gradient_checkpointing_use_reentrant_false(self):
-        pass
+        super().test_training_gradient_checkpointing_use_reentrant_false()
+
+    @pytest.mark.xfail(reason="This architecture seems to not compute gradients for some layer.")
+    def test_training_gradient_checkpointing_use_reentrant_true(self):
+        super().test_training_gradient_checkpointing_use_reentrant_true()
 
     def test_generate_from_input_values(self):
         for model_class in self.all_generative_model_classes:
@@ -834,6 +821,10 @@ class MoshiTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
         super().test_prepare_inputs_for_generation_kwargs_forwards(
             last_hidden_state=torch.randn(2, 3, 32), kwargs_depth_decoder={}
         )
+
+    @unittest.skip(reason="Moshi has no separate base model without a head.")
+    def test_model_base_model_prefix(self):
+        pass
 
 
 def place_dict_on_device(dict_to_place, device):

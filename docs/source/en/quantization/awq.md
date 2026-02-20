@@ -55,10 +55,11 @@ Load the AWQ-quantized model with [`~PreTrainedModel.from_pretrained`]. This aut
 If the model is loaded on the CPU, use the `device_map` parameter to move it to an accelerator.
 
 ```py
-from transformers import AutoModelForCausalLM, AutoTokenizer, infer_device
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from accelerate import Accelerator
 import torch
 
-device = f"{infer_device()}:0"
+device = Accelerator().device
 
 model = AutoModelForCausalLM.from_pretrained(
   "TheBloke/zephyr-7B-alpha-AWQ",
@@ -221,31 +222,6 @@ model = AutoModelForCausalLM.from_pretrained(
     "TheBloke/Mistral-7B-Instruct-v0.1-AWQ",
     quantization_config=quantization_config,
     device_map="auto",
-)
-```
-
-## CPU
-
-[Intel Extension for PyTorch (IPEX)](https://intel.github.io/intel-extension-for-pytorch/cpu/latest/) is designed to enable performance optimizations on Intel hardware. Run the command below to install the latest version of autoawq with IPEX support.
-
-```bash
-pip install intel-extension-for-pytorch # for IPEX-GPU refer to https://intel.github.io/intel-extension-for-pytorch/xpu/2.5.10+xpu/ 
-pip install git+https://github.com/casper-hansen/AutoAWQ.git
-```
-
-Set `version="ipex"` in [`AwqConfig`] to enable ExLlamaV2 kernels.
-
-```python
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, AwqConfig
-
-device = "cpu" # set to "xpu" for Intel GPU
-quantization_config = AwqConfig(version="ipex")
-
-model = AutoModelForCausalLM.from_pretrained(
-    "TheBloke/TinyLlama-1.1B-Chat-v0.3-AWQ",
-    quantization_config=quantization_config,
-    device_map=device,
 )
 ```
 

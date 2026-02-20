@@ -41,7 +41,7 @@ To see all architectures and checkpoints compatible with this task, we recommend
 Before you begin, make sure you have all the necessary libraries installed:
 
 ```bash
-pip install -q datasets transformers accelerate timm
+pip install -q datasets transformers accelerate timm trackio
 pip install -q -U albumentations>=1.4.5 torchmetrics pycocotools
 ```
 
@@ -558,6 +558,8 @@ Face to upload your model).
 ...     save_strategy="epoch",
 ...     save_total_limit=2,
 ...     remove_unused_columns=False,
+...     report_to="trackio",
+...     run_name="cppe",
 ...     eval_do_concat_batches=False,
 ...     push_to_hub=True,
 ... )
@@ -1494,9 +1496,9 @@ Now that you have finetuned a model, evaluated it, and uploaded it to the Huggin
 Load model and image processor from the Hugging Face Hub (skip to use already trained in this session):
 
 ```py
->>> from transformers import infer_device
+>>> from accelerate import Accelerator
 
->>> device = infer_device()
+>>> device = Accelerator().device
 >>> model_repo = "qubvel-hf/detr_finetuned_cppe5"
 
 >>> image_processor = AutoImageProcessor.from_pretrained(model_repo)
