@@ -56,8 +56,6 @@ class VibeVoiceAcousticTokenizerConfig(PretrainedConfig):
         vae_std (`float`, *optional*, defaults to 0.625):
             Standard deviation used for VAE sampling after encoder.
 
-    Example:
-
     ```python
     >>> from transformers import VibeVoiceAcousticTokenizerModel, VibeVoiceAcousticTokenizerConfig
 
@@ -89,7 +87,6 @@ class VibeVoiceAcousticTokenizerConfig(PretrainedConfig):
         vae_std=0.625,
         **kwargs,
     ):
-
         super().__init__(**kwargs)
         self.channels = channels
         self.hidden_size = hidden_size
@@ -103,7 +100,6 @@ class VibeVoiceAcousticTokenizerConfig(PretrainedConfig):
         self.downsampling_ratios = downsampling_ratios
         self.depths = depths
         self.vae_std = vae_std
-        
 
     @property
     def hop_length(self):
