@@ -236,10 +236,8 @@ class VibeVoiceAsrForConditionalGeneration(AudioFlamingo3ForConditionalGeneratio
                 )
 
         with torch.no_grad():
-            acoustic_encoder_cache = None
-            semantic_encoder_cache = None
-            acoustic_latents = []
-            semantic_latents = []
+            acoustic_encoder_cache, semantic_encoder_cache = None, None
+            acoustic_latents, semantic_latents = [], []
 
             for chunk in torch.split(input_values, tokenizer_chunk_size, dim=-1):
                 acoustic_encoder_output = self.acoustic_tokenizer(
