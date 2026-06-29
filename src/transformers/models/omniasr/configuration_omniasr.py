@@ -421,14 +421,5 @@ class OmniASRLLMConfig(PreTrainedConfig):
         # TODO or + self.num_special_tokens? (see with zero shot model)
         return len(self.language_mapping) + 1
 
-    @property
-    def last_segment_token_id(self):
-        # Streaming segment-marker tokens are allocated immediately after the language marker token.
-        return self.language_token_id + 1
-
-    @property
-    def regular_segment_token_id(self):
-        return self.language_token_id + 2
-
 
 __all__ = ["OmniASRCTCConfig", "OmniASRLLMConfig", "OmniASRConfig"]

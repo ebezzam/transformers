@@ -142,8 +142,6 @@ class OmniASRForConditionalGenerationModelTest(ModelTesterMixin, unittest.TestCa
     test_pruning = False
     test_headmasking = False
     test_resize_embeddings = False
-    # OmniASR is prompted by audio (`input_values`), not `input_ids` with placeholder tokens.
-    main_input_name = "input_values"
 
     def setUp(self):
         self.model_tester = OmniASRModelTester(self)
@@ -170,7 +168,10 @@ class OmniASRForConditionalGenerationModelTest(ModelTesterMixin, unittest.TestCa
             out = model(**inputs_dict, labels=labels)
             self.assertIsNotNone(out.loss)
             out.loss.backward()
-            self.assertTrue(any(p.grad is not None for p in model.parameters()))
+            # gradients must reach all three trainable sub-modules, not merely the projector
+            self.assertTrue(any(p.grad is not None for p in model.encoder.parameters()))
+            self.assertTrue(any(p.grad is not None for p in model.language_model.parameters()))
+            self.assertIsNotNone(model.multi_modal_projector.weight.grad)
 
     def test_generate(self):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
@@ -179,7 +180,7 @@ class OmniASRForConditionalGenerationModelTest(ModelTesterMixin, unittest.TestCa
             with torch.no_grad():
                 generated = model.generate(**inputs_dict, max_new_tokens=4, do_sample=False)
             self.assertEqual(generated.shape[0], self.model_tester.batch_size)
-            self.assertLessEqual(generated.shape[1], 4)
+            self.assertTrue(1 <= generated.shape[1] <= 4, f"unexpected generated length {generated.shape[1]}")
 
     @unittest.skip(
         reason="OmniASR builds its own input embeddings from audio; it has no input_ids/embeds equivalence."
@@ -219,17 +220,27 @@ class OmniASRForConditionalGenerationModelTest(ModelTesterMixin, unittest.TestCa
     def test_flex_attention_with_grads(self, *args):
         pass
 
-    @unittest.skip(
-        reason="OmniASR uses a custom audio-prompted generate; the standard cache format check does not apply."
-    )
-    def test_past_key_values_format(self, *args):
-        pass
-
-    @unittest.skip(
-        reason="OmniASR prepends a variable-length audio context, so the standard logits_to_keep shape check does not apply."
-    )
-    def test_forward_with_logits_to_keep(self):
-        pass
+    def test_streaming_generate(self):
+        # Streaming ("unlimited"-length) decode: a 0.05s segment is 800 samples, so a 1500-sample clip spans 2
+        # segments and exercises the segment loop + marker tokens + context carry-over.
+        tester = self.model_tester
+        config = OmniASRLLMConfig(
+            encoder_config=tester.encoder_config,
+            text_config=tester.text_config,
+            language_mapping={"eng_latn": 1},
+            language_token_id=90,
+            num_special_tokens=3,
+            is_streaming=True,
+            segment_seconds=0.05,
+            num_context_segments=1,
+        )
+        model = OmniASRForConditionalGeneration(config).to(torch_device).eval()
+        input_values = floats_tensor([1, 1500])
+        language_ids = ids_tensor([1], config.num_language_embeddings)
+        # no outer torch.no_grad(): the streaming path must manage that itself
+        generated = model.generate(input_values=input_values, language_ids=language_ids, max_new_tokens=3)
+        self.assertEqual(generated.shape[0], 1)
+        self.assertGreaterEqual(generated.shape[1], 1)
 
 
 @require_torch
@@ -237,7 +248,7 @@ class OmniASRForCTCIntegrationTest(unittest.TestCase):
     _dataset = None
 
     @classmethod
-    def setUp(cls):
+    def setUpClass(cls):
         cls.checkpoint_name = "bezzam/omniasr-ctc-300m-v2"
         cls.dtype = torch.float32
         cls.processor = AutoProcessor.from_pretrained("bezzam/omniasr-ctc-300m-v2")
@@ -320,7 +331,7 @@ class OmniASRForConditionalGenerationIntegrationTest(unittest.TestCase):
     _dataset = None
 
     @classmethod
-    def setUp(cls):
+    def setUpClass(cls):
         cls.checkpoint_name = "bezzam/omniasr-llm-300m-v2"
         cls.dtype = torch.float32
         cls.processor = AutoProcessor.from_pretrained("bezzam/omniasr-llm-300m-v2")

@@ -348,9 +348,10 @@ def convert_omniasr_checkpoint(model_card, repo_id=None, bfloat16=False, output_
         # https://github.com/facebookresearch/omnilingual-asr/blob/main/src/omnilingual_asr/models/wav2vec2_ssl/config.py
         original_config = get_config(resolver, Wav2Vec2Config, "large_lv60k")
         original_config.encoder_config.attn_dropout_p = 0.0
-        if "300" in model_card:
+        card_lower = model_card.lower()
+        if "300" in card_lower:
             pass
-        elif "1b" in model_card:
+        elif "1b" in card_lower:
             original_config.encoder_config.model_dim = 1280
             original_config.encoder_config.num_encoder_layers = 48
             original_config.encoder_config.ffn_inner_dim = 5120
@@ -358,7 +359,7 @@ def convert_omniasr_checkpoint(model_card, repo_id=None, bfloat16=False, output_
             original_config.quantized_dim = 1024
             original_config.final_dim = 1024
             original_config.encoder_config.first_pass_dropout_p = 0.1
-        elif "3b" in model_card:
+        elif "3b" in card_lower:
             original_config.encoder_config.model_dim = 2048
             original_config.encoder_config.num_encoder_layers = 60
             original_config.encoder_config.ffn_inner_dim = 8192
@@ -366,7 +367,7 @@ def convert_omniasr_checkpoint(model_card, repo_id=None, bfloat16=False, output_
             original_config.quantized_dim = 1024
             original_config.final_dim = 1024
             original_config.encoder_config.first_pass_dropout_p = 0.1
-        elif "7b" in model_card:
+        elif "7b" in card_lower:
             original_config.encoder_config.model_dim = 2048
             original_config.encoder_config.num_encoder_layers = 128
             original_config.encoder_config.ffn_inner_dim = 8192
