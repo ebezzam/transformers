@@ -765,7 +765,6 @@ MODEL_NAMES_MAPPING = OrderedDict[str, str](
         ("omdet-turbo", "OmDet-Turbo"),
         ("omniasr", "OmniASR"),
         ("omniasr_ctc", "OmniASR"),
-        ("omniasr", "OmniASREncoder"),
         ("omniasr_llm", "OmniASR"),
         ("oneformer", "OneFormer"),
         ("openai-gpt", "OpenAI GPT"),

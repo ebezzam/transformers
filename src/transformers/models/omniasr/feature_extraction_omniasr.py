@@ -41,10 +41,6 @@ class OmniASRFeatureExtractor(SequenceFeatureExtractor):
             The sampling rate at which the audio files should be digitalized expressed in hertz (Hz).
         padding_value (`float`, *optional*, defaults to 0.0):
             The value that is used to fill the padding values.
-        do_normalize (`bool`, *optional*, defaults to `True`):
-            Whether or not to zero-mean unit-variance normalize the input. Normalizing can help to significantly
-            improve the performance for some models, *e.g.*,
-            [wav2vec2-lv60](https://huggingface.co/models?search=lv60).
         return_attention_mask (`bool`, *optional*, defaults to `False`):
             Whether or not [`~OmniASRFeatureExtractor.__call__`] should return `attention_mask`.
 
@@ -59,7 +55,11 @@ class OmniASRFeatureExtractor(SequenceFeatureExtractor):
             [wav2vec2-lv60](https://huggingface.co/facebook/wav2vec2-large-960h-lv60-self), `attention_mask` should be
             passed for batched inference.
 
-            </Tip>"""
+            </Tip>
+        do_normalize (`bool`, *optional*, defaults to `True`):
+            Whether or not to zero-mean unit-variance normalize the input. Normalizing can help to significantly
+            improve the performance for some models, *e.g.*,
+            [wav2vec2-lv60](https://huggingface.co/models?search=lv60)."""
 
     model_input_names = ["input_values", "attention_mask"]
 

@@ -118,6 +118,8 @@ IGNORE_NON_TESTED = (
     + [
         # models to ignore for not tested
         "RecurrentGemmaModel",  # Building part of bigger (tested) model.
+        "OmniASRModel",  # Audio encoder; exercised via the (tested) OmniASR LLM and CTC variants.
+        "OmniASRForCTC",  # Covered by `OmniASRForCTCIntegrationTest`; shares the encoder with the unit-tested LLM variant.
         "FuyuForCausalLM",  # Not tested fort now
         "InstructBlipQFormerModel",  # Building part of bigger (tested) model.
         "InstructBlipVideoQFormerModel",  # Building part of bigger (tested) model.
