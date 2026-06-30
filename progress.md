@@ -63,6 +63,11 @@ format clean, batched-vs-standalone transcription parity PASS.
   value); `omniasr_llm` is only in the base `MODEL_MAPPING` (not a generative `MODEL_FOR_*`); `add_adapter=True`
   hits undefined adapter config fields.
 - Converter: reload-verify only checks parameter *count*; `vocab_scores[0]→"<pad>"` may mislabel BOS (index 0).
+- `_streaming_generate` (batched, unequal-length) discards the audio `attention_mask` and segments the trailing
+  padding of shorter utterances as if it were audio (uses `audio.size(1)`, the padded length) — same bug class
+  as the now-fixed non-streaming path, but in the streaming loop (niche: streaming is normally single-audio).
+- Feature extractor on a degenerate length-0 (all-silence) utterance yields an all-`padding_value` row and an
+  all-zero frame mask (no warning) → empty/garbage transcription for that element.
 
 ## Pre-PR audit — bugs found & fixed
 A deliberate edge-case / silent-error sweep (not just re-running the checks) found and **fixed**:

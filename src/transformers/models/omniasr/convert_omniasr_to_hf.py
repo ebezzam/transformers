@@ -78,8 +78,6 @@ from fairseq2.runtime.dependency import get_dependency_resolver
 from omnilingual_asr.models.inference.pipeline import ASRInferencePipeline
 from omnilingual_asr.models.wav2vec2_llama.config import ModelType, Wav2Vec2LlamaConfig
 
-# `Wav2Vec2LlamaStreamingConfig` only exists in omnilingual-asr >= 0.2.0 and is only needed for the "unlimited"
-# (streaming) cards; import it lazily so the converter still runs in a v1 (0.1.0) environment.
 from transformers import (
     LasrTokenizer,
     LlamaConfig,
@@ -343,6 +341,8 @@ def convert_omniasr_checkpoint(model_card, repo_id=None, bfloat16=False, output_
             original_config_llm.model_type = ModelType.LLM_ASR_LID
 
             if "unlimited" in model_card.lower():
+                # `Wav2Vec2LlamaStreamingConfig` only exists in omnilingual-asr >= 0.2.0 (the unlimited cards);
+                # imported lazily so the converter still runs in a v1 (0.1.0) environment.
                 from omnilingual_asr.models.wav2vec2_llama.config import Wav2Vec2LlamaStreamingConfig
 
                 original_config_llm.n_special_tokens = 3

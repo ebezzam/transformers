@@ -76,29 +76,6 @@ class OmniASRFeatureExtractor(SequenceFeatureExtractor):
         self.return_attention_mask = return_attention_mask
         self.do_normalize = do_normalize
 
-    # TODO remove since replayed with layer_norm
-    @staticmethod
-    def zero_mean_unit_var_norm(
-        input_values: list[np.ndarray], attention_mask: list[np.ndarray], padding_value: float = 0.0
-    ) -> list[np.ndarray]:
-        """
-        Every array in the list is normalized to have zero mean and unit variance
-        """
-        if attention_mask is not None:
-            attention_mask = np.array(attention_mask, np.int32)
-            normed_input_values = []
-
-            for vector, length in zip(input_values, attention_mask.sum(-1)):
-                normed_slice = (vector - vector[:length].mean()) / np.sqrt(vector[:length].var() + 1e-7)
-                if length < normed_slice.shape[0]:
-                    normed_slice[length:] = padding_value
-
-                normed_input_values.append(normed_slice)
-        else:
-            normed_input_values = [(x - x.mean()) / np.sqrt(x.var() + 1e-7) for x in input_values]
-
-        return normed_input_values
-
     def __call__(
         self,
         raw_speech: Union[np.ndarray, list[float], list[np.ndarray], list[list[float]]],
@@ -192,6 +169,20 @@ class OmniASRFeatureExtractor(SequenceFeatureExtractor):
         if not is_batched:
             raw_speech = [raw_speech]
 
+        # Per-utterance zero-mean / unit-variance normalization, applied BEFORE padding so padding never enters
+        # the statistics (this matches the original's per-waveform `layer_norm` and is independent of whether an
+        # attention mask is returned). Normalizing the padded (batch, seq) tensor jointly would mix statistics
+        # across utterances and over padding, silently corrupting batched (batch_size > 1) inputs.
+        # https://github.com/facebookresearch/omnilingual-asr/blob/81f51e224ce9e74b02cc2a3eaf21b2d91d743455/src/omnilingual_asr/datasets/utils/audio.py#L162
+        if self.do_normalize:
+            normalized = []
+            for array in raw_speech:
+                array = np.ascontiguousarray(np.asarray(array, dtype=np.float32))
+                with torch.no_grad():
+                    array = layer_norm(torch.from_numpy(array), (array.shape[-1],)).numpy()
+                normalized.append(array)
+            raw_speech = normalized
+
         # convert into correct format for padding
         encoded_inputs = BatchFeature({"input_values": raw_speech})
 
@@ -221,28 +212,6 @@ class OmniASRFeatureExtractor(SequenceFeatureExtractor):
         attention_mask = padded_inputs.get("attention_mask")
         if attention_mask is not None:
             padded_inputs["attention_mask"] = [np.asarray(array, dtype=np.int32) for array in attention_mask]
-
-        # zero-mean and unit-variance normalization. This MUST be done per-utterance over each waveform's valid
-        # (non-padded) samples, matching the original's per-waveform `layer_norm`:
-        # https://github.com/facebookresearch/omnilingual-asr/blob/81f51e224ce9e74b02cc2a3eaf21b2d91d743455/src/omnilingual_asr/datasets/utils/audio.py#L162
-        # https://github.com/facebookresearch/omnilingual-asr/blob/81f51e224ce9e74b02cc2a3eaf21b2d91d743455/src/omnilingual_asr/datasets/utils/audio.py#L23
-        # Normalizing over the whole padded batch jointly (a single `layer_norm` over the (batch, seq) tensor)
-        # would mix statistics across samples and include padding, silently corrupting every batch_size > 1 input.
-        if self.do_normalize:
-            mask = padded_inputs.get("attention_mask")
-            normed_input_values = []
-            for i, array in enumerate(padded_inputs["input_values"]):
-                array = np.asarray(array, dtype=np.float32)
-                length = int(np.asarray(mask[i]).sum()) if mask is not None else array.shape[-1]
-                with torch.no_grad():
-                    valid = layer_norm(torch.from_numpy(np.ascontiguousarray(array[:length])), (length,)).numpy()
-                if length < array.shape[-1]:
-                    normed = np.full(array.shape[-1], self.padding_value, dtype=np.float32)
-                    normed[:length] = valid
-                else:
-                    normed = valid
-                normed_input_values.append(normed)
-            padded_inputs["input_values"] = normed_input_values
 
         if return_tensors is not None:
             padded_inputs = padded_inputs.convert_to_tensors(return_tensors)
