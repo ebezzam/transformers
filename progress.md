@@ -13,6 +13,22 @@ toward a human-owned, mergeable PR.
   `check_config_docstrings`, `check_copies`, `check_dummies`, `check_inits` — all rc=0.
 - Finetune path verified: tiny-config forward → loss (≈ln(vocab)) → backward → generate all work.
 
+## Tier-1 layer-by-layer parity (original fairseq2 vs HF port) — see `PARITY.md`
+Validated **every model, size, and variant** — v1 **and** v2, CTC + LLM (300M→7B), plus **Unlimited
+(streaming)** and **Zero-Shot** — activation-by-activation: feed the *same* normalized `input_values` to both,
+hook each aligned module, assert per-stage max diff (harness in `scripts/parity/`).
+- **Encoder (all sizes/variants) + CTC head + audio projector: bit-exact** — `max_abs_diff == 0.0` in float32
+  across the conv frontend, every transformer layer (up to 128 for the 7B), the final norm, and the
+  logits/projector. (Streaming/ZS encoders are driven directly, since their full forward gates on
+  streaming/context inputs.)
+- **Shared 12-layer Llama decoder (LLM): relative diff ~1e-6 with the predicted token identical at every
+  position** (the absolute 2.4e-3 is just float32 ULPs on Llama "massive activations" of magnitude ~8000).
+- 7B ships **bf16** (matches the original's bf16-default inference); a float32 re-convert gives the bit-exact
+  rows. Two converter fixes fell out of this work: (1) `getattr`-guard the `streaming_config` access (v1's
+  omnilingual-asr 0.1.0 config lacks the field → conversion crashed); (2) load the original on CPU while the HF
+  model owns the GPU, so weight-norm is removed on GPU (bit-exact with the original's GPU runtime) and the 7B
+  float32 conversion fits a single 48 GB GPU.
+
 ## Pre-PR audit — bugs found & fixed
 A deliberate edge-case / silent-error sweep (not just re-running the checks) found and **fixed**:
 - **Batched-audio attention masking (silent correctness).** A padded batch's raw-waveform `attention_mask` was

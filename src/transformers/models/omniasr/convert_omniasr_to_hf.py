@@ -252,11 +252,20 @@ def param_count(model):
 def convert_omniasr_checkpoint(model_card, repo_id=None, bfloat16=False, output_dir=None):
     if not torch.cuda.is_available():
         logger.warning(
-            "CUDA is not available, conversion will be done on CPU but it is STRONGLY recommended to use GPU for proper removal of weight norm."
+            "CUDA is not available, conversion will be done on CPU but it is STRONGLY recommended to use GPU "
+            "for proper removal of weight norm: weight-norm is baked into `pos_conv` on the HF model's device, "
+            "and CPU vs GPU float32 rounding differs by ULPs (the converted model then matches the original to "
+            "a relative ~1e-6 instead of bit-exactly)."
         )
         device = torch.device("cpu")
     else:
         device = torch.device("cuda")
+
+    # The original model is only read for its weight values (`state_dict()` / a few attributes), never run, so
+    # keep it on CPU and let the (larger) HF model own the GPU alone. This both avoids OOM for the 7B float32
+    # conversion (original + HF would exceed a single GPU) and ensures weight-norm removal runs on the HF model's
+    # GPU, i.e. bit-exact with the original's GPU runtime. Falls back to CPU when no GPU is available.
+    original_device = torch.device("cpu") if device.type == "cuda" else device
 
     if not bfloat16:
         dtype = torch.float32
@@ -266,11 +275,11 @@ def convert_omniasr_checkpoint(model_card, repo_id=None, bfloat16=False, output_
     # 1) Load original model
     assert model_card is not None, "Must specify original model name in omnilingual-asr"
     if "W2V" not in model_card:
-        pipeline = ASRInferencePipeline(model_card=model_card, device=device, dtype=dtype)
+        pipeline = ASRInferencePipeline(model_card=model_card, device=original_device, dtype=dtype)
         original_model = pipeline.model
         original_tokenizer = pipeline.tokenizer
     else:
-        original_model = load_model(model_card, device=device, dtype=dtype)
+        original_model = load_model(model_card, device=original_device, dtype=dtype)
         original_tokenizer = None
 
     resolver = get_dependency_resolver()
@@ -464,6 +473,20 @@ def convert_omniasr_checkpoint(model_card, repo_id=None, bfloat16=False, output_
         # see https://github.com/facebookresearch/omnilingual-asr/blob/main/src/omnilingual_asr/models/wav2vec2_llama/factory.py#L212-L218
         # https://github.com/facebookresearch/omnilingual-asr/blob/81f51e224ce9e74b02cc2a3eaf21b2d91d743455/src/omnilingual_asr/models/wav2vec2_llama/config.py#L28
 
+        # Streaming ("unlimited"-length) parameters. v2 configs carry a `streaming_config`; v1
+        # (omnilingual-asr 0.1.0) and the regular non-streaming LLM models do not, in which case
+        # OmniASRLLMConfig's non-streaming defaults apply.
+        streaming_config = getattr(original_config_llm, "streaming_config", None)
+        streaming_kwargs = {}
+        if streaming_config is not None:
+            streaming_kwargs = dict(
+                is_streaming=streaming_config.is_streaming,
+                segment_seconds=streaming_config.segment_secs,
+                num_context_segments=streaming_config.n_context_segments,
+                audio_sample_rate=streaming_config.sample_rate,
+                min_audio_ms=streaming_config.min_audio_ms,
+            )
+
         config = OmniASRLLMConfig(
             encoder_config=encoder_config,
             text_config=llama_config,
@@ -480,12 +503,7 @@ def convert_omniasr_checkpoint(model_card, repo_id=None, bfloat16=False, output_
             # LID marker is the first reserved special token, i.e. the base
             # vocabulary size before adding extra syntax tokens.
             language_token_id=original_config_llm.llama_config.vocab_size,
-            # Streaming ("unlimited"-length) parameters; `is_streaming` is False for the regular LLM models.
-            is_streaming=original_config_llm.streaming_config.is_streaming,
-            segment_seconds=original_config_llm.streaming_config.segment_secs,
-            num_context_segments=original_config_llm.streaming_config.n_context_segments,
-            audio_sample_rate=original_config_llm.streaming_config.sample_rate,
-            min_audio_ms=original_config_llm.streaming_config.min_audio_ms,
+            **streaming_kwargs,
         )
         hf_model = OmniASRForConditionalGeneration(config)
     elif "W2V" in model_card:
