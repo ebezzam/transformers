@@ -8,12 +8,14 @@ float32 models fit on one 48GB GPU. Reports max abs diff at every stage:
 
 Usage:  parity_harness.py <model_card> <hf_path> <ctc|llm>  [out_json]
 """
+
 import gc
 import json
 import sys
 
 import torch
 from datasets import Audio, load_dataset
+
 
 model_card, hf_path, variant = sys.argv[1], sys.argv[2], sys.argv[3]
 out_json = sys.argv[4] if len(sys.argv) > 4 else None
@@ -22,6 +24,7 @@ TOL = 1e-3
 
 # --- shared normalized input (HF processor); kept on CPU, moved to GPU per-model ---
 from transformers import AutoProcessor  # noqa: E402
+
 
 ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation").cast_column(
     "audio", Audio(sampling_rate=16000)
@@ -36,6 +39,7 @@ def mk(store, name):
         t = out[0] if isinstance(out, (tuple, list)) else out
         if torch.is_tensor(t):
             store[name] = t.detach().float().cpu()
+
     return fn
 
 
@@ -43,8 +47,8 @@ def mk(store, name):
 orig_acts = {}
 from fairseq2.datasets.batch import Seq2SeqBatch  # noqa: E402
 from fairseq2.nn.batch_layout import BatchLayout  # noqa: E402
-
 from omnilingual_asr.models.inference.pipeline import ASRInferencePipeline  # noqa: E402
+
 
 pipe = ASRInferencePipeline(model_card=model_card, device=dev, dtype=dtype)
 om = pipe.model.eval()
@@ -83,6 +87,7 @@ torch.cuda.empty_cache()
 # ============================ HF PORT ============================
 hf_acts = {}
 from transformers import OmniASRForConditionalGeneration, OmniASRForCTC  # noqa: E402
+
 
 Cls = OmniASRForCTC if variant == "ctc" else OmniASRForConditionalGeneration
 hf = Cls.from_pretrained(hf_path, dtype=dtype).to(dev).eval()
@@ -134,5 +139,15 @@ print(f"OVERALL max_abs_diff = {overall:.3e}  ->  {verdict}  (tol {TOL})")
 
 if out_json:
     with open(out_json, "w") as f:
-        json.dump({"model_card": model_card, "variant": variant, "overall_max_abs_diff": overall,
-                   "verdict": verdict, "tol": TOL, "stages": rows}, f, indent=2)
+        json.dump(
+            {
+                "model_card": model_card,
+                "variant": variant,
+                "overall_max_abs_diff": overall,
+                "verdict": verdict,
+                "tol": TOL,
+                "stages": rows,
+            },
+            f,
+            indent=2,
+        )

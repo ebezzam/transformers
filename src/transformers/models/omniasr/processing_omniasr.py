@@ -131,6 +131,17 @@ class OmniASRProcessor(ProcessorMixin):
                         f"Available languages: {list(self.language_mapping.keys())[:10]}... "
                         f"({len(self.language_mapping)} total)"
                     )
+            if audio is not None:
+                # The model concatenates one language embedding per audio utterance, so `language` must line up
+                # with the audio batch. Broadcast a single language across the batch; otherwise require a match.
+                num_audio = len(inputs["input_values"])
+                if len(language_ids) == 1 and num_audio > 1:
+                    language_ids = language_ids * num_audio
+                elif len(language_ids) != num_audio:
+                    raise ValueError(
+                        f"Got {len(language_ids)} language(s) for {num_audio} audio input(s). Pass one language "
+                        f"per utterance, or a single language to broadcast across the batch."
+                    )
             inputs["language_ids"] = torch.tensor(language_ids, dtype=torch.long)
 
         if text is not None:

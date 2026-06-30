@@ -9,6 +9,7 @@ Same input embeds => any drift localizes to the decoder weights / RoPE handling.
 
 Usage:  decoder_parity.py <model_card> <hf_path> [out_json]
 """
+
 import gc
 import json
 import sys
@@ -16,12 +17,14 @@ import sys
 import torch
 from datasets import Audio, load_dataset
 
+
 model_card, hf_path = sys.argv[1], sys.argv[2]
 out_json = sys.argv[3] if len(sys.argv) > 3 else None
 dev, dtype = torch.device("cuda"), torch.float32
 TOL = 1e-3
 
 from transformers import AutoProcessor, OmniASRForConditionalGeneration  # noqa: E402
+
 
 ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation").cast_column(
     "audio", Audio(sampling_rate=16000)
@@ -36,6 +39,7 @@ def mk(store, name):
         t = out[0] if isinstance(out, (tuple, list)) else out
         if torch.is_tensor(t):
             store[name] = t.detach().float().cpu()
+
     return fn
 
 
@@ -61,8 +65,8 @@ torch.cuda.empty_cache()
 # ===== ORIGINAL: feed the IDENTICAL inputs_embeds through llama_decoder + final_proj =====
 orig_acts = {}
 from fairseq2.nn.batch_layout import BatchLayout  # noqa: E402
-
 from omnilingual_asr.models.inference.pipeline import ASRInferencePipeline  # noqa: E402
+
 
 pipe = ASRInferencePipeline(model_card=model_card, device=dev, dtype=dtype)
 m = pipe.model.eval()
@@ -106,15 +110,33 @@ rell = dl / (lmag + 1e-12)
 overall_rel = max(overall_rel, rell)
 # argmax agreement (does the predicted token match at every position?)
 argmax_match = bool((lo.argmax(-1) == lh.argmax(-1)).all())
-rows["logits"] = {"max_abs_diff": dl, "max_abs_val": lmag, "rel": rell,
-                  "vocab_orig": logits_orig.shape[-1], "vocab_hf": logits_hf.shape[-1],
-                  "common_vocab": V, "argmax_match": argmax_match}
-print(f"  {'logits':14s} abs={dl:.3e}  |val|max={lmag:8.1f}  rel={rell:.2e}  "
-      f"vocab(orig={logits_orig.shape[-1]},hf={logits_hf.shape[-1]})  argmax_match={argmax_match}")
+rows["logits"] = {
+    "max_abs_diff": dl,
+    "max_abs_val": lmag,
+    "rel": rell,
+    "vocab_orig": logits_orig.shape[-1],
+    "vocab_hf": logits_hf.shape[-1],
+    "common_vocab": V,
+    "argmax_match": argmax_match,
+}
+print(
+    f"  {'logits':14s} abs={dl:.3e}  |val|max={lmag:8.1f}  rel={rell:.2e}  "
+    f"vocab(orig={logits_orig.shape[-1]},hf={logits_hf.shape[-1]})  argmax_match={argmax_match}"
+)
 verdict = "PASS" if (overall_rel < REL_TOL and argmax_match) else "FAIL"
 print(f"OVERALL decoder max_REL_diff = {overall_rel:.3e}  ->  {verdict}  (rel_tol {REL_TOL}, argmax must match)")
 
 if out_json:
     with open(out_json, "w") as f:
-        json.dump({"model_card": model_card, "kind": "decoder", "overall_max_rel_diff": overall_rel,
-                   "verdict": verdict, "rel_tol": REL_TOL, "stages": rows}, f, indent=2)
+        json.dump(
+            {
+                "model_card": model_card,
+                "kind": "decoder",
+                "overall_max_rel_diff": overall_rel,
+                "verdict": verdict,
+                "rel_tol": REL_TOL,
+                "stages": rows,
+            },
+            f,
+            indent=2,
+        )

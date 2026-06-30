@@ -29,6 +29,41 @@ hook each aligned module, assert per-stage max diff (harness in `scripts/parity/
   model owns the GPU, so weight-norm is removed on GPU (bit-exact with the original's GPU runtime) and the 7B
   float32 conversion fits a single 48 GB GPU.
 
+## Pre-review hardening pass (4 introspection agents + fixes)
+A deep silent-error audit (4 parallel agents over modeling / converter / processing-FE-tokenizer /
+config-tests-auto) found and **fixed** the following. The two headline bugs are silent and structurally
+invisible to the batch-1 parity harness (both only corrupt *batched, unequal-length* audio):
+- **Feature extractor normalized across the whole batch** (`layer_norm(x, x.shape)` over the (batch, seq)
+  tensor) instead of per-utterance, and crashed on ragged unpadded batches. Now normalizes each utterance over
+  its valid samples (matches the original per-waveform `layer_norm`; batch-1 output unchanged — verified).
+- **LLM `get_audio_features` ran the encoder without the audio `attention_mask`**, so padded frames
+  contaminated valid-frame embeddings for batched input (the CTC path already passed it). Mask now threaded
+  through `forward`/`generate`. Verified end-to-end: a heavily-padded clip transcribes identically batched vs.
+  standalone.
+- **Streaming config** with `num_special_tokens < 3` produced out-of-vocab segment markers → `IndexError`;
+  now validated in `OmniASRLLMConfig`.
+- **Processor** didn't check `language` count vs. the audio batch; now broadcasts a single language or raises.
+- **Auto-maps**: added `omniasr_ctc` to `processing_auto`; removed the wrong `("omniasr","Wav2Vec2CTCTokenizer")`
+  tokenizer entry (real checkpoints resolve `LasrTokenizer` via `tokenizer_config.json`).
+- **Converter**: lazy-import `Wav2Vec2LlamaStreamingConfig` (so v1 envs don't ImportError); download the
+  SentencePiece model to a temp dir instead of CWD; zero the Zero-Shot `lang_embeddings` (was random) and
+  document that ZS context-example inference is not implemented.
+
+Verification after fixes: `check_modular_conversion` clean, fast unit suite **52 passed / 67 skipped**, ruff +
+format clean, batched-vs-standalone transcription parity PASS.
+
+### Known follow-ups (surfaced by the audit, deferred for the human / `code-review max` to weigh)
+- Zero-Shot is weights-validated only — the in-context example path is unimplemented (treat as unsupported).
+- No fast-suite coverage for `OmniASRForCTC` / `OmniASRModel`; integration `setUpClass` does a network
+  `from_pretrained` that runs even when `@slow`-skipped (offline collection fails).
+- Modeling: streaming emits `[lang_embedding, lid_marker]` while non-streaming uses `[lid_marker,
+  lang_embedding]` (confirm against upstream); EOS loss target sits after masked padding for batched
+  variable-length training; `forward(labels=…)` without `input_values` raises an unclear error.
+- `config.language_token_id` default (9218) is silently overridden by the modeling bump (config value ≠ used
+  value); `omniasr_llm` is only in the base `MODEL_MAPPING` (not a generative `MODEL_FOR_*`); `add_adapter=True`
+  hits undefined adapter config fields.
+- Converter: reload-verify only checks parameter *count*; `vocab_scores[0]→"<pad>"` may mislabel BOS (index 0).
+
 ## Pre-PR audit — bugs found & fixed
 A deliberate edge-case / silent-error sweep (not just re-running the checks) found and **fixed**:
 - **Batched-audio attention masking (silent correctness).** A padded batch's raw-waveform `attention_mask` was

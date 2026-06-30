@@ -409,6 +409,15 @@ class OmniASRLLMConfig(PreTrainedConfig):
         self.audio_sample_rate = audio_sample_rate
         self.min_audio_ms = min_audio_ms
 
+        # Streaming reserves three special tokens after the base vocabulary: the LID marker plus the
+        # `last_segment`/`regular_segment` markers (`language_token_id` + 1/+2 in the modeling code). With fewer,
+        # those marker ids fall outside the embedding table and `generate()` would raise an opaque IndexError.
+        if is_streaming and num_special_tokens < 3:
+            raise ValueError(
+                f"Streaming models require num_special_tokens >= 3 (LID + last/regular segment markers), but got "
+                f"num_special_tokens={num_special_tokens}."
+            )
+
         super().__init__(
             pad_token_id=pad_token_id,
             bos_token_id=bos_token_id,

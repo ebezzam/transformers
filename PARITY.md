@@ -88,6 +88,11 @@ dimensions reach magnitude **~8000** — so `2.4e-3 / 8000 ≈ 3e-7`. The LM log
 - **Vocab.** The HF LM head carries a few extra rows vs the original `final_proj` (`+num_special_tokens`: the
   language/segment markers the original keeps in separate embeddings). The shared text-token logits align
   exactly; parity compares the common vocab and confirms argmax agreement.
+- **Zero-Shot scope.** The rows above show the ZS model's *encoder* and *Llama decoder* **weights** convert
+  bit-exactly. They do **not** mean ZS is usable end-to-end: zero-shot decoding conditions on in-context
+  audio/text example pairs, and that context path is **not yet implemented** in the HF modeling. ZS also has
+  no language-embedding table (`language_embedding_probability=0`); the converter now zeroes the HF table so
+  the checkpoint is deterministic. ZS should be treated as a weights-validated but inference-incomplete variant.
 
 ## Reproduction
 

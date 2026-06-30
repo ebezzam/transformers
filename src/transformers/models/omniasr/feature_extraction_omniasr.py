@@ -222,22 +222,27 @@ class OmniASRFeatureExtractor(SequenceFeatureExtractor):
         if attention_mask is not None:
             padded_inputs["attention_mask"] = [np.asarray(array, dtype=np.int32) for array in attention_mask]
 
-        # zero-mean and unit-variance normalization
+        # zero-mean and unit-variance normalization. This MUST be done per-utterance over each waveform's valid
+        # (non-padded) samples, matching the original's per-waveform `layer_norm`:
+        # https://github.com/facebookresearch/omnilingual-asr/blob/81f51e224ce9e74b02cc2a3eaf21b2d91d743455/src/omnilingual_asr/datasets/utils/audio.py#L162
+        # https://github.com/facebookresearch/omnilingual-asr/blob/81f51e224ce9e74b02cc2a3eaf21b2d91d743455/src/omnilingual_asr/datasets/utils/audio.py#L23
+        # Normalizing over the whole padded batch jointly (a single `layer_norm` over the (batch, seq) tensor)
+        # would mix statistics across samples and include padding, silently corrupting every batch_size > 1 input.
         if self.do_normalize:
-            attention_mask = (
-                attention_mask
-                if self._get_padding_strategies(padding, max_length=max_length) is not PaddingStrategy.DO_NOT_PAD
-                else None
-            )
-            # padded_inputs["input_values"] = self.zero_mean_unit_var_norm(
-            #     padded_inputs["input_values"], attention_mask=attention_mask, padding_value=self.padding_value
-            # )
-
-            # https://github.com/facebookresearch/omnilingual-asr/blob/81f51e224ce9e74b02cc2a3eaf21b2d91d743455/src/omnilingual_asr/datasets/utils/audio.py#L162
-            # https://github.com/facebookresearch/omnilingual-asr/blob/81f51e224ce9e74b02cc2a3eaf21b2d91d743455/src/omnilingual_asr/datasets/utils/audio.py#L23
-            input_values = torch.tensor(padded_inputs["input_values"])
-            with torch.no_grad():
-                padded_inputs["input_values"] = layer_norm(input_values, input_values.shape)
+            mask = padded_inputs.get("attention_mask")
+            normed_input_values = []
+            for i, array in enumerate(padded_inputs["input_values"]):
+                array = np.asarray(array, dtype=np.float32)
+                length = int(np.asarray(mask[i]).sum()) if mask is not None else array.shape[-1]
+                with torch.no_grad():
+                    valid = layer_norm(torch.from_numpy(np.ascontiguousarray(array[:length])), (length,)).numpy()
+                if length < array.shape[-1]:
+                    normed = np.full(array.shape[-1], self.padding_value, dtype=np.float32)
+                    normed[:length] = valid
+                else:
+                    normed = valid
+                normed_input_values.append(normed)
+            padded_inputs["input_values"] = normed_input_values
 
         if return_tensors is not None:
             padded_inputs = padded_inputs.convert_to_tensors(return_tensors)

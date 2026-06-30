@@ -1344,8 +1344,11 @@ class OmniASRForConditionalGeneration(OmniASRPreTrainedModel, GenerationMixin):
     def set_output_embeddings(self, new_embeddings):
         self.language_model.set_output_embeddings(new_embeddings)
 
-    def get_audio_features(self, input_features: torch.FloatTensor):
-        audio_outputs = self.encoder(input_features)
+    def get_audio_features(self, input_features: torch.FloatTensor, attention_mask: Optional[torch.Tensor] = None):
+        # Pass the audio attention mask through to the encoder: its CNN frontend + bidirectional pre-norm
+        # Transformer must not attend over padded frames, otherwise batched unequal-length audio silently
+        # contaminates the valid-frame embeddings (the CTC path already forwards the mask).
+        audio_outputs = self.encoder(input_features, attention_mask=attention_mask)
         audio_hidden_states = audio_outputs.last_hidden_state
         # `encoder_stacking` stacks consecutive encoder frames along the feature dimension (e.g. the zero-shot model
         # uses 3); the multi-modal projector's input dimension already accounts for this. For the default stacking of
@@ -1424,7 +1427,7 @@ class OmniASRForConditionalGeneration(OmniASRPreTrainedModel, GenerationMixin):
             batch_size = input_values.size(0)
             device = input_values.device
 
-            audio_embeds = self.get_audio_features(input_values)
+            audio_embeds = self.get_audio_features(input_values, attention_mask=attention_mask)
             dtype = audio_embeds.dtype
 
             language_id_token_batch = torch.full(
@@ -1604,7 +1607,8 @@ class OmniASRForConditionalGeneration(OmniASRPreTrainedModel, GenerationMixin):
             batch_size = input_values.size(0)
             device = input_values.device
 
-            audio_embeds = self.get_audio_features(input_values)
+            audio_attention_mask = kwargs.pop("attention_mask", None)
+            audio_embeds = self.get_audio_features(input_values, attention_mask=audio_attention_mask)
             dtype = audio_embeds.dtype
             text_embed_fn = self.get_input_embeddings()
 
@@ -1622,7 +1626,6 @@ class OmniASRForConditionalGeneration(OmniASRPreTrainedModel, GenerationMixin):
             lang_id_embeds = self.lang_embeddings(language_id_batch.unsqueeze(-1)).to(dtype)
 
             inputs_embeds = torch.cat([audio_embeds, lid_marker_embeds, lang_id_embeds, bos_embeds], dim=1)
-            audio_attention_mask = kwargs.pop("attention_mask", None)
             attention_mask = self._build_audio_context_attention_mask(audio_embeds, audio_attention_mask)
 
             return super().generate(inputs_embeds=inputs_embeds, attention_mask=attention_mask, **kwargs)

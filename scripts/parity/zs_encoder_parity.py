@@ -5,17 +5,20 @@ elsewhere); encoder_stacking=3 is a weightless reshape exercised by HF `get_audi
 
 Usage:  zs_encoder_parity.py <model_card> <hf_path>
 """
+
 import gc
 import sys
 
 import torch
 from datasets import Audio, load_dataset
 
+
 model_card, hf_path = sys.argv[1], sys.argv[2]
 dev, dtype = torch.device("cuda"), torch.float32
 TOL = 1e-3
 
 from transformers import AutoProcessor, OmniASRForConditionalGeneration  # noqa: E402
+
 
 ds = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation").cast_column(
     "audio", Audio(sampling_rate=16000)
@@ -30,6 +33,7 @@ def mk(store, name):
         t = out[0] if isinstance(out, (tuple, list)) else out
         if torch.is_tensor(t):
             store[name] = t.detach().float().cpu()
+
     return fn
 
 
@@ -49,8 +53,8 @@ torch.cuda.empty_cache()
 # ---- ORIGINAL encoder (hook layers); drive it directly via the frontend+encoder ----
 orig_acts = {}
 from fairseq2.nn.batch_layout import BatchLayout  # noqa: E402
-
 from omnilingual_asr.models.inference.pipeline import ASRInferencePipeline  # noqa: E402
+
 
 pipe = ASRInferencePipeline(model_card=model_card, device=dev, dtype=dtype)
 om = pipe.model.eval()
@@ -77,6 +81,6 @@ for k in [f"enc_layer_{i:02d}" for i in range(n_layers)] + ["enc_final_norm"]:
             continue
         d = (a - b).abs().max().item()
         overall = max(overall, d)
-        if k in (f"enc_layer_00", f"enc_layer_{n_layers-1:02d}", "enc_final_norm"):
+        if k in ("enc_layer_00", f"enc_layer_{n_layers - 1:02d}", "enc_final_norm"):
             print(f"  {k}: max_abs_diff={d:.3e} shape={tuple(a.shape)}")
 print(f"OVERALL encoder max_abs_diff = {overall:.3e} -> {'PASS' if overall < TOL else 'FAIL'} (tol {TOL})")

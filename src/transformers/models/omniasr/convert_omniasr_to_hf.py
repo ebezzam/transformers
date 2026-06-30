@@ -65,6 +65,7 @@ Original model checkpoints are saved under:  ~/.cache/fairseq2/assets/
 
 import argparse
 import os
+import tempfile
 import urllib.request
 
 import torch
@@ -75,8 +76,10 @@ from fairseq2.models.wav2vec2.config import Wav2Vec2Config
 from fairseq2.runtime.config_registry import get_config
 from fairseq2.runtime.dependency import get_dependency_resolver
 from omnilingual_asr.models.inference.pipeline import ASRInferencePipeline
-from omnilingual_asr.models.wav2vec2_llama.config import ModelType, Wav2Vec2LlamaConfig, Wav2Vec2LlamaStreamingConfig
+from omnilingual_asr.models.wav2vec2_llama.config import ModelType, Wav2Vec2LlamaConfig
 
+# `Wav2Vec2LlamaStreamingConfig` only exists in omnilingual-asr >= 0.2.0 and is only needed for the "unlimited"
+# (streaming) cards; import it lazily so the converter still runs in a v1 (0.1.0) environment.
 from transformers import (
     LasrTokenizer,
     LlamaConfig,
@@ -227,13 +230,19 @@ def _convert_model(original_model, hf_model, encoder_convert_list, decoder_conve
     if len(extra_keys) != 0:
         raise ValueError(f"{len(extra_keys)} extra keys found: {extra_keys}")
     missing_keys = set(hf_model.state_dict().keys()) - set(state_dict.keys())
-    # The zero-shot model is trained without language embeddings (lang_embeddings_p=0), so its original checkpoint has
-    # no `lang_embeddings.weight`; keep the model's (unused) initialized table for it.
+    # The zero-shot model is trained without language embeddings (lang_embeddings_p=0), so its original checkpoint
+    # has no `lang_embeddings.weight`. The HF `forward` still indexes `lang_embeddings`, so the otherwise random
+    # table is zeroed after loading (below) to keep the converted checkpoint deterministic.
     allowed_missing = {"lang_embeddings.weight"}
     unexpected_missing = missing_keys - allowed_missing
     if len(unexpected_missing) != 0:
         raise ValueError(f"{len(unexpected_missing)} missing keys found: {unexpected_missing}")
     hf_model.load_state_dict(state_dict, strict=False)
+    if "lang_embeddings.weight" in missing_keys and hasattr(hf_model, "lang_embeddings"):
+        # No original language-embedding table (zero-shot): zero it so it contributes deterministically.
+        # NOTE: zero-shot context-example inference is not implemented in the HF modeling, so this checkpoint is
+        # not yet usable for true zero-shot decoding (the encoder/decoder weights still convert exactly).
+        hf_model.lang_embeddings.weight.data.zero_()
     n_params = param_count(hf_model)
 
     logger.info(f"model loaded: {round(n_params / 1e6, 1)}M params")
@@ -334,6 +343,8 @@ def convert_omniasr_checkpoint(model_card, repo_id=None, bfloat16=False, output_
             original_config_llm.model_type = ModelType.LLM_ASR_LID
 
             if "unlimited" in model_card.lower():
+                from omnilingual_asr.models.wav2vec2_llama.config import Wav2Vec2LlamaStreamingConfig
+
                 original_config_llm.n_special_tokens = 3
                 original_config_llm.lang_embeddings_p = 0.8
                 original_config_llm.streaming_config = Wav2Vec2LlamaStreamingConfig(
@@ -479,13 +490,13 @@ def convert_omniasr_checkpoint(model_card, repo_id=None, bfloat16=False, output_
         streaming_config = getattr(original_config_llm, "streaming_config", None)
         streaming_kwargs = {}
         if streaming_config is not None:
-            streaming_kwargs = dict(
-                is_streaming=streaming_config.is_streaming,
-                segment_seconds=streaming_config.segment_secs,
-                num_context_segments=streaming_config.n_context_segments,
-                audio_sample_rate=streaming_config.sample_rate,
-                min_audio_ms=streaming_config.min_audio_ms,
-            )
+            streaming_kwargs = {
+                "is_streaming": streaming_config.is_streaming,
+                "segment_seconds": streaming_config.segment_secs,
+                "num_context_segments": streaming_config.n_context_segments,
+                "audio_sample_rate": streaming_config.sample_rate,
+                "min_audio_ms": streaming_config.min_audio_ms,
+            }
 
         config = OmniASRLLMConfig(
             encoder_config=encoder_config,
@@ -549,10 +560,12 @@ def convert_omniasr_checkpoint(model_card, repo_id=None, bfloat16=False, output_
         tokenizer_url = "https://dl.fbaipublicfiles.com/mms/omniASR_tokenizer_v7.model"
     else:
         tokenizer_url = "https://dl.fbaipublicfiles.com/mms/omniASR_tokenizer.model"
-    download_dir = os.getcwd()
-    tokenizer_path = os.path.join(download_dir, os.path.basename(tokenizer_url))
-    urllib.request.urlretrieve(tokenizer_url, tokenizer_path)
-    vocab_ids, vocab_scores, merges = SentencePieceExtractor(tokenizer_path).extract()
+    # Download the SentencePiece model into a temporary directory (not the CWD) and extract its vocab; the
+    # extracted `vocab_scores` persist after the temp dir is removed, so nothing downstream needs the file.
+    with tempfile.TemporaryDirectory() as download_dir:
+        tokenizer_path = os.path.join(download_dir, os.path.basename(tokenizer_url))
+        urllib.request.urlretrieve(tokenizer_url, tokenizer_path)
+        vocab_ids, vocab_scores, merges = SentencePieceExtractor(tokenizer_path).extract()
     # TODO do we also need to overwrite the pad token to be ID 0? (before <s>)
     vocab_scores[0] = ("<pad>", vocab_scores[0][1])
     # TODO create own tokenizer like LasrTokenizer but with correct special tokens?
@@ -604,11 +617,7 @@ def convert_omniasr_checkpoint(model_card, repo_id=None, bfloat16=False, output_
         hf_model.push_to_hub(repo_id)
         processor.push_to_hub(repo_id)
 
-    # 6) Cleanup
-    if os.path.exists(tokenizer_path):
-        os.remove(tokenizer_path)
-
-    # 7) Verify the converted checkpoint reloads from disk
+    # 6) Verify the converted checkpoint reloads from disk
     if output_dir:
         logger.info("Verifying the saved checkpoint reloads ...")
         reloaded = type(hf_model).from_pretrained(output_dir)
