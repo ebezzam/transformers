@@ -261,8 +261,13 @@ class OmniASRForCTCModelTest(unittest.TestCase):
         "num_conv_pos_embedding_groups": 2,
     }
     batch_size = 3
-    audio_seq_length = 1600
+    # 4000 samples -> 12 encoder frames (conv stride 5 * 2^6); must stay above the CTC target length below so
+    # the alignment is feasible (otherwise ctc_loss returns +inf with NaN gradients).
+    audio_seq_length = 4000
     vocab_size = 99
+
+    def tearDown(self):
+        cleanup(torch_device, gc_collect=True)
 
     def _config(self):
         # pad_token_id=0 is the CTC blank token.
@@ -281,13 +286,16 @@ class OmniASRForCTCModelTest(unittest.TestCase):
         config = self._config()
         model = OmniASRForCTC(config).to(torch_device).train()
         input_values = floats_tensor([self.batch_size, self.audio_seq_length]).to(torch_device)
-        # labels in [1, vocab-1] so they never collide with the CTC blank (0)
+        # labels in [1, vocab-1] so they never collide with the CTC blank (0); target length (5) < 12 frames.
         labels = ids_tensor([self.batch_size, 5], config.vocab_size - 1) + 1
         out = model(input_values=input_values, labels=labels)
         self.assertIsNotNone(out.loss)
+        # a finite loss confirms the alignment is feasible (a too-long target would give +inf / NaN grads)
+        self.assertTrue(torch.isfinite(out.loss).item())
         out.loss.backward()
         self.assertTrue(any(p.grad is not None for p in model.encoder.parameters()))
         self.assertIsNotNone(model.ctc_head.weight.grad)
+        self.assertFalse(torch.isnan(model.ctc_head.weight.grad).any().item())
 
     def test_encoder_forward(self):
         config = self._config()
