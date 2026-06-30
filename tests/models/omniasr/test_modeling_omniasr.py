@@ -39,9 +39,11 @@ if is_torch_available():
 
     from transformers import (
         AutoProcessor,
+        OmniASRCTCConfig,
         OmniASRForConditionalGeneration,
         OmniASRForCTC,
         OmniASRLLMConfig,
+        OmniASRModel,
     )
 
 
@@ -244,24 +246,85 @@ class OmniASRForConditionalGenerationModelTest(ModelTesterMixin, unittest.TestCa
 
 
 @require_torch
+class OmniASRForCTCModelTest(unittest.TestCase):
+    """Fast (no-download) coverage for the CTC variant and the bare audio encoder."""
+
+    encoder_config = {
+        "hidden_size": 32,
+        "conv_dim": [32, 32, 32, 32, 32, 32, 32],
+        "conv_stride": [5, 2, 2, 2, 2, 2, 2],
+        "conv_kernel": [10, 3, 3, 3, 3, 2, 2],
+        "num_hidden_layers": 2,
+        "num_attention_heads": 4,
+        "intermediate_size": 37,
+        "num_conv_pos_embeddings": 16,
+        "num_conv_pos_embedding_groups": 2,
+    }
+    batch_size = 3
+    audio_seq_length = 1600
+    vocab_size = 99
+
+    def _config(self):
+        # pad_token_id=0 is the CTC blank token.
+        return OmniASRCTCConfig(encoder_config=self.encoder_config, vocab_size=self.vocab_size, pad_token_id=0)
+
+    def test_ctc_forward_logits_shape(self):
+        config = self._config()
+        model = OmniASRForCTC(config).to(torch_device).eval()
+        input_values = floats_tensor([self.batch_size, self.audio_seq_length]).to(torch_device)
+        with torch.no_grad():
+            logits = model(input_values=input_values).logits
+        self.assertEqual(logits.shape[0], self.batch_size)
+        self.assertEqual(logits.shape[-1], config.vocab_size)
+
+    def test_ctc_loss_and_backward(self):
+        config = self._config()
+        model = OmniASRForCTC(config).to(torch_device).train()
+        input_values = floats_tensor([self.batch_size, self.audio_seq_length]).to(torch_device)
+        # labels in [1, vocab-1] so they never collide with the CTC blank (0)
+        labels = ids_tensor([self.batch_size, 5], config.vocab_size - 1) + 1
+        out = model(input_values=input_values, labels=labels)
+        self.assertIsNotNone(out.loss)
+        out.loss.backward()
+        self.assertTrue(any(p.grad is not None for p in model.encoder.parameters()))
+        self.assertIsNotNone(model.ctc_head.weight.grad)
+
+    def test_encoder_forward(self):
+        config = self._config()
+        encoder = OmniASRModel(config.encoder_config).to(torch_device).eval()
+        input_values = floats_tensor([self.batch_size, self.audio_seq_length]).to(torch_device)
+        with torch.no_grad():
+            outputs = encoder(input_values=input_values)
+        self.assertEqual(outputs.last_hidden_state.shape[0], self.batch_size)
+        self.assertEqual(outputs.last_hidden_state.shape[-1], config.encoder_config.hidden_size)
+
+
+@require_torch
 class OmniASRForCTCIntegrationTest(unittest.TestCase):
     _dataset = None
+
+    _processor = None
 
     @classmethod
     def setUpClass(cls):
         cls.checkpoint_name = "bezzam/omniasr-ctc-300m-v2"
         cls.dtype = torch.float32
-        cls.processor = AutoProcessor.from_pretrained("bezzam/omniasr-ctc-300m-v2")
+
+    @property
+    def processor(self):
+        # Loaded lazily (not in setUpClass) so the fast/offline suite never hits the Hub for these @slow tests.
+        if type(self)._processor is None:
+            type(self)._processor = AutoProcessor.from_pretrained(self.checkpoint_name)
+        return type(self)._processor
 
     def tearDown(self):
         cleanup(torch_device, gc_collect=True)
 
-    @classmethod
-    def _load_dataset(cls):
-        if cls._dataset is None:
-            cls._dataset = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
-            cls._dataset = cls._dataset.cast_column(
-                "audio", Audio(sampling_rate=cls.processor.feature_extractor.sampling_rate)
+    def _load_dataset(self):
+        if type(self)._dataset is None:
+            dataset = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
+            type(self)._dataset = dataset.cast_column(
+                "audio", Audio(sampling_rate=self.processor.feature_extractor.sampling_rate)
             )
 
     def _load_datasamples(self, num_samples):
@@ -329,22 +392,28 @@ class OmniASRForCTCIntegrationTest(unittest.TestCase):
 @require_torch
 class OmniASRForConditionalGenerationIntegrationTest(unittest.TestCase):
     _dataset = None
+    _processor = None
 
     @classmethod
     def setUpClass(cls):
         cls.checkpoint_name = "bezzam/omniasr-llm-300m-v2"
         cls.dtype = torch.float32
-        cls.processor = AutoProcessor.from_pretrained("bezzam/omniasr-llm-300m-v2")
+
+    @property
+    def processor(self):
+        # Loaded lazily (not in setUpClass) so the fast/offline suite never hits the Hub for these @slow tests.
+        if type(self)._processor is None:
+            type(self)._processor = AutoProcessor.from_pretrained(self.checkpoint_name)
+        return type(self)._processor
 
     def tearDown(self):
         cleanup(torch_device, gc_collect=True)
 
-    @classmethod
-    def _load_dataset(cls):
-        if cls._dataset is None:
-            cls._dataset = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
-            cls._dataset = cls._dataset.cast_column(
-                "audio", Audio(sampling_rate=cls.processor.feature_extractor.sampling_rate)
+    def _load_dataset(self):
+        if type(self)._dataset is None:
+            dataset = load_dataset("hf-internal-testing/librispeech_asr_dummy", "clean", split="validation")
+            type(self)._dataset = dataset.cast_column(
+                "audio", Audio(sampling_rate=self.processor.feature_extractor.sampling_rate)
             )
 
     def _load_datasamples(self, num_samples):
