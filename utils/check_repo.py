@@ -118,6 +118,11 @@ IGNORE_NON_TESTED = (
     + [
         # models to ignore for not tested
         "RecurrentGemmaModel",  # Building part of bigger (tested) model.
+        # Fast-tested by `OmniASRForCTCModelTest` (forward / CTC loss / bare-encoder forward); the shared
+        # Wav2Vec2-style encoder is additionally run through the full `ModelTesterMixin` battery via the LLM
+        # variant, so these two are excluded from the common battery only.
+        "OmniASRModel",
+        "OmniASRForCTC",
         "FuyuForCausalLM",  # Not tested fort now
         "InstructBlipQFormerModel",  # Building part of bigger (tested) model.
         "InstructBlipVideoQFormerModel",  # Building part of bigger (tested) model.

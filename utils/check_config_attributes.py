@@ -32,6 +32,8 @@ transformers = direct_transformers_import(PATH_TO_TRANSFORMERS)
 CONFIG_MAPPING = transformers.models.auto.configuration_auto.CONFIG_MAPPING
 
 SPECIAL_CASES_TO_ALLOW = {
+    # `language_mapping` is consumed by `OmniASRProcessor` to map language codes to IDs, not by the model.
+    "OmniASRLLMConfig": ["language_mapping"],
     "AfmoeConfig": [
         "global_attn_every_n_layers",  # used internally in config to generate `layer_types`
         "rope_scaling",  # used internally in config to generate `rope_parameters`

@@ -41,10 +41,6 @@ class OmniASRFeatureExtractor(SequenceFeatureExtractor):
             The sampling rate at which the audio files should be digitalized expressed in hertz (Hz).
         padding_value (`float`, *optional*, defaults to 0.0):
             The value that is used to fill the padding values.
-        do_normalize (`bool`, *optional*, defaults to `True`):
-            Whether or not to zero-mean unit-variance normalize the input. Normalizing can help to significantly
-            improve the performance for some models, *e.g.*,
-            [wav2vec2-lv60](https://huggingface.co/models?search=lv60).
         return_attention_mask (`bool`, *optional*, defaults to `False`):
             Whether or not [`~OmniASRFeatureExtractor.__call__`] should return `attention_mask`.
 
@@ -59,7 +55,11 @@ class OmniASRFeatureExtractor(SequenceFeatureExtractor):
             [wav2vec2-lv60](https://huggingface.co/facebook/wav2vec2-large-960h-lv60-self), `attention_mask` should be
             passed for batched inference.
 
-            </Tip>"""
+            </Tip>
+        do_normalize (`bool`, *optional*, defaults to `True`):
+            Whether or not to zero-mean unit-variance normalize the input. Normalizing can help to significantly
+            improve the performance for some models, *e.g.*,
+            [wav2vec2-lv60](https://huggingface.co/models?search=lv60)."""
 
     model_input_names = ["input_values", "attention_mask"]
 
@@ -75,29 +75,6 @@ class OmniASRFeatureExtractor(SequenceFeatureExtractor):
         super().__init__(feature_size=feature_size, sampling_rate=sampling_rate, padding_value=padding_value, **kwargs)
         self.return_attention_mask = return_attention_mask
         self.do_normalize = do_normalize
-
-    # TODO remove since replayed with layer_norm
-    @staticmethod
-    def zero_mean_unit_var_norm(
-        input_values: list[np.ndarray], attention_mask: list[np.ndarray], padding_value: float = 0.0
-    ) -> list[np.ndarray]:
-        """
-        Every array in the list is normalized to have zero mean and unit variance
-        """
-        if attention_mask is not None:
-            attention_mask = np.array(attention_mask, np.int32)
-            normed_input_values = []
-
-            for vector, length in zip(input_values, attention_mask.sum(-1)):
-                normed_slice = (vector - vector[:length].mean()) / np.sqrt(vector[:length].var() + 1e-7)
-                if length < normed_slice.shape[0]:
-                    normed_slice[length:] = padding_value
-
-                normed_input_values.append(normed_slice)
-        else:
-            normed_input_values = [(x - x.mean()) / np.sqrt(x.var() + 1e-7) for x in input_values]
-
-        return normed_input_values
 
     def __call__(
         self,
@@ -192,6 +169,20 @@ class OmniASRFeatureExtractor(SequenceFeatureExtractor):
         if not is_batched:
             raw_speech = [raw_speech]
 
+        # Per-utterance zero-mean / unit-variance normalization, applied BEFORE padding so padding never enters
+        # the statistics (this matches the original's per-waveform `layer_norm` and is independent of whether an
+        # attention mask is returned). Normalizing the padded (batch, seq) tensor jointly would mix statistics
+        # across utterances and over padding, silently corrupting batched (batch_size > 1) inputs.
+        # https://github.com/facebookresearch/omnilingual-asr/blob/81f51e224ce9e74b02cc2a3eaf21b2d91d743455/src/omnilingual_asr/datasets/utils/audio.py#L162
+        if self.do_normalize:
+            normalized = []
+            for array in raw_speech:
+                array = np.ascontiguousarray(np.asarray(array, dtype=np.float32))
+                with torch.no_grad():
+                    array = layer_norm(torch.from_numpy(array), (array.shape[-1],)).numpy()
+                normalized.append(array)
+            raw_speech = normalized
+
         # convert into correct format for padding
         encoded_inputs = BatchFeature({"input_values": raw_speech})
 
@@ -221,23 +212,6 @@ class OmniASRFeatureExtractor(SequenceFeatureExtractor):
         attention_mask = padded_inputs.get("attention_mask")
         if attention_mask is not None:
             padded_inputs["attention_mask"] = [np.asarray(array, dtype=np.int32) for array in attention_mask]
-
-        # zero-mean and unit-variance normalization
-        if self.do_normalize:
-            attention_mask = (
-                attention_mask
-                if self._get_padding_strategies(padding, max_length=max_length) is not PaddingStrategy.DO_NOT_PAD
-                else None
-            )
-            # padded_inputs["input_values"] = self.zero_mean_unit_var_norm(
-            #     padded_inputs["input_values"], attention_mask=attention_mask, padding_value=self.padding_value
-            # )
-
-            # https://github.com/facebookresearch/omnilingual-asr/blob/81f51e224ce9e74b02cc2a3eaf21b2d91d743455/src/omnilingual_asr/datasets/utils/audio.py#L162
-            # https://github.com/facebookresearch/omnilingual-asr/blob/81f51e224ce9e74b02cc2a3eaf21b2d91d743455/src/omnilingual_asr/datasets/utils/audio.py#L23
-            input_values = torch.tensor(padded_inputs["input_values"])
-            with torch.no_grad():
-                padded_inputs["input_values"] = layer_norm(input_values, input_values.shape)
 
         if return_tensors is not None:
             padded_inputs = padded_inputs.convert_to_tensors(return_tensors)
