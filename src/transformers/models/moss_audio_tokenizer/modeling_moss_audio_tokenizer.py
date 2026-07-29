@@ -18,6 +18,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Optional
@@ -26,14 +27,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ...activations import ACT2FN
 from ...cache_utils import Cache, DynamicCache
-from ...integrations import use_kernel_func_from_hub, use_kernelized_func
+from ...integrations import use_kernel_func_from_hub
 from ...masking_utils import create_sliding_window_causal_mask
 from ...modeling_layers import GradientCheckpointingLayer
+from ...modeling_outputs import BaseModelOutputWithPast
 from ...modeling_rope_utils import ROPE_INIT_FUNCTIONS, dynamic_rope_update
 from ...modeling_utils import ALL_ATTENTION_FUNCTIONS, PreTrainedAudioTokenizerBase
 from ...processing_utils import Unpack
-from ...utils import ModelOutput, TransformersKwargs, auto_docstring, can_return_tuple
+from ...utils import ModelOutput, TransformersKwargs, auto_docstring, can_return_tuple, logging
 from ...utils.generic import maybe_autocast
 from .configuration_moss_audio_tokenizer import (
     MossAudioTokenizerConfig,
@@ -42,6 +45,9 @@ from .configuration_moss_audio_tokenizer import (
     MossAudioTokenizerQuantizerConfig,
     MossAudioTokenizerTransformerConfig,
 )
+
+
+logger = logging.get_logger(__name__)
 
 
 @auto_docstring
@@ -97,12 +103,18 @@ class MossAudioTokenizerOutput(ModelOutput):
 
 
 class MossAudioTokenizerLayerScale(nn.Module):
-    def __init__(self, config) -> None:
-        super().__init__()
-        self.lambda1 = nn.Parameter(config.layerscale_value * torch.ones(config.hidden_size))
+    """Layer scale from [Touvron et al 2021] (https://huggingface.co/papers/2103.17239).
+    This rescales diagonally the residual outputs close to 0, with a learnt scale.
+    """
 
-    def forward(self, hidden_state: torch.Tensor) -> torch.Tensor:
-        return hidden_state * self.lambda1
+    def __init__(self, config):
+        super().__init__()
+        channels = config.hidden_size
+        initial_scale = config.layer_scale_initial_scale
+        self.scale = nn.Parameter(torch.full((channels,), initial_scale, requires_grad=True))
+
+    def forward(self, x: torch.Tensor):
+        return self.scale * x
 
 
 class MossAudioTokenizerRotaryEmbedding(nn.Module):
@@ -168,6 +180,21 @@ class MossAudioTokenizerRotaryEmbedding(nn.Module):
             sin = emb.sin() * self.attention_scaling
 
         return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
+
+
+class MossAudioTokenizerMLP(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.activation_fn = ACT2FN[config.hidden_act]
+        self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size, bias=False)
+        self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size, bias=False)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.fc1(hidden_states)
+        hidden_states = self.activation_fn(hidden_states)
+        hidden_states = self.fc2(hidden_states)
+        return hidden_states
 
 
 def rotate_half(x):
@@ -240,40 +267,43 @@ def eager_attention_forward(
     return attn_output, attn_weights
 
 
-@use_kernelized_func(apply_rotary_pos_emb)
 class MossAudioTokenizerAttention(nn.Module):
-    """Multi-head sliding-window causal attention."""
+    """Multi-headed attention from 'Attention Is All You Need' paper"""
 
-    def __init__(self, config: MossAudioTokenizerTransformerConfig, layer_idx: int):
+    def __init__(self, config: MossAudioTokenizerConfig, layer_idx: int | None = None):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
-        self.head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
-        self.num_key_value_groups = config.num_attention_heads // config.num_key_value_heads
-        self.scaling = self.head_dim**-0.5
-        self.attention_dropout = config.attention_dropout
-        self.is_causal = True
 
-        self.q_proj = nn.Linear(
-            config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias
-        )
-        self.k_proj = nn.Linear(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias
-        )
-        self.v_proj = nn.Linear(
-            config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias
-        )
-        self.o_proj = nn.Linear(
-            config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias
-        )
+        self.attention_dropout = config.attention_dropout
+        self.hidden_size = config.hidden_size
+        self.num_heads = config.num_attention_heads
+        self.head_dim = config.head_dim
+        self.num_key_value_heads = config.num_key_value_heads
+        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+        self.max_position_embeddings = config.max_position_embeddings
+        self.is_causal = True
+        self.scaling = 1 / math.sqrt(config.head_dim)
+
+        if self.hidden_size % self.num_heads != 0:
+            raise ValueError(
+                f"hidden_size must be divisible by num_heads (got `hidden_size`: {self.hidden_size}"
+                f" and `num_heads`: {self.num_heads})."
+            )
+
+        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias)
+        self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
+        self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
+        self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias)
+        self.sliding_window = config.sliding_window
 
     def forward(
         self,
         hidden_states: torch.Tensor,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
         attention_mask: torch.Tensor | None = None,
         past_key_values: Cache | None = None,
-        **kwargs: Unpack[TransformersKwargs],
+        position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
+        **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
@@ -300,6 +330,7 @@ class MossAudioTokenizerAttention(nn.Module):
             attention_mask,
             dropout=0.0 if not self.training else self.attention_dropout,
             scaling=self.scaling,
+            sliding_window=self.sliding_window,
             **kwargs,
         )
 
@@ -309,96 +340,205 @@ class MossAudioTokenizerAttention(nn.Module):
 
 
 class MossAudioTokenizerTransformerLayer(GradientCheckpointingLayer):
-    """Transformer layer with layer scale, used by both the encoder and the decoder."""
-
-    def __init__(self, config: MossAudioTokenizerTransformerConfig, layer_idx: int):
+    def __init__(self, config: MossAudioTokenizerConfig, layer_idx: int):
         super().__init__()
-        self.embed_dim = config.d_model
-        self.self_attn = MossAudioTokenizerAttention(config, layer_idx)
-        self.self_attn_layer_norm = nn.LayerNorm(self.embed_dim)
-        self.dropout = config.dropout
-        self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size, bias=False)
-        self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size, bias=False)
-        self.final_layer_norm = nn.LayerNorm(self.embed_dim)
-        self.layer_scale_1 = MossAudioTokenizerLayerScale(config)
-        self.layer_scale_2 = MossAudioTokenizerLayerScale(config)
+        self.hidden_size = config.hidden_size
+
+        self.self_attn = MossAudioTokenizerAttention(config=config, layer_idx=layer_idx)
+
+        self.mlp = MossAudioTokenizerMLP(config)
+        self.input_layernorm = nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
+        self.post_attention_layernorm = nn.LayerNorm(config.hidden_size, eps=config.norm_eps)
+        self.self_attn_layer_scale = MossAudioTokenizerLayerScale(config)
+        self.mlp_layer_scale = MossAudioTokenizerLayerScale(config)
 
     def forward(
         self,
         hidden_states: torch.Tensor,
         attention_mask: torch.Tensor | None = None,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
         past_key_values: Cache | None = None,
+        output_attentions: bool | None = False,
+        use_cache: bool | None = False,
+        position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
         **kwargs,
-    ) -> torch.Tensor:
-        """
-        Args:
-            hidden_states (`torch.FloatTensor`): input to the layer of shape `(batch, seq_len, embed_dim)`
-            attention_mask (`torch.FloatTensor`): attention mask of size
-                `(batch, 1, tgt_len, src_len)` where padding elements are indicated by very large negative values.
-        """
+    ) -> tuple[torch.FloatTensor, tuple[torch.FloatTensor, torch.FloatTensor] | None]:
         residual = hidden_states
-        hidden_states = self.self_attn_layer_norm(hidden_states)
-        hidden_states, _ = self.self_attn(
-            hidden_states,
-            position_embeddings=position_embeddings,
+
+        hidden_states = self.input_layernorm(hidden_states)
+
+        # Self Attention
+        hidden_states, self_attn_weights = self.self_attn(
+            hidden_states=hidden_states,
             attention_mask=attention_mask,
             past_key_values=past_key_values,
+            output_attentions=output_attentions,
+            use_cache=use_cache,
+            position_embeddings=position_embeddings,
             **kwargs,
         )
-        hidden_states = residual + self.layer_scale_1(hidden_states)
+        hidden_states = residual + self.self_attn_layer_scale(hidden_states)
 
+        # Fully Connected
         residual = hidden_states
-        hidden_states = self.final_layer_norm(hidden_states)
-        hidden_states = self.fc2(F.gelu(self.fc1(hidden_states)))
-        hidden_states = residual + self.layer_scale_2(hidden_states)
-        return hidden_states
+        hidden_states = self.post_attention_layernorm(hidden_states)
+        hidden_states = self.mlp(hidden_states)
+        hidden_states = residual + self.mlp_layer_scale(hidden_states)
+
+        outputs = (hidden_states,)
+
+        if output_attentions:
+            outputs += (self_attn_weights,)
+
+        return outputs
 
 
 class MossAudioTokenizerTransformer(nn.Module):
-    """Stack of transformer layers with sliding-window causal attention."""
+    """
+    Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`MossAudioTokenizerTransformerLayer`]
 
-    def __init__(self, config: MossAudioTokenizerTransformerConfig):
+    Args:
+        config: MossAudioTokenizerConfig
+    """
+
+    def __init__(self, config: MossAudioTokenizerConfig):
         super().__init__()
-        self.config = config
-        self.rotary_emb = MossAudioTokenizerRotaryEmbedding(config)
+
         self.layers = nn.ModuleList(
             [MossAudioTokenizerTransformerLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
         )
+        self.rotary_emb = MossAudioTokenizerRotaryEmbedding(config)
+
+        self.gradient_checkpointing = False
+        self.config = config
 
     def forward(
         self,
-        hidden_states: torch.Tensor,
+        hidden_states: torch.LongTensor | None = None,
+        attention_mask: torch.Tensor | None = None,
+        position_ids: torch.LongTensor | None = None,
         past_key_values: Cache | None = None,
         use_cache: bool | None = None,
+        output_attentions: bool | None = None,
+        output_hidden_states: bool | None = None,
+        return_dict: bool | None = None,
         **kwargs,
-    ) -> torch.Tensor:
+    ) -> tuple | BaseModelOutputWithPast:
+        """
+        Args:
+            hidden_states (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`, *optional*):
+                Embedded representation that will be contextualized by the model
+            attention_mask (`torch.Tensor` of shape `(batch_size, sequence_length)`, *optional*):
+                Mask to avoid performing attention on padding token indices. Mask values selected in `[0, 1]`:
+
+                - 1 for tokens that are **not masked**,
+                - 0 for tokens that are **masked**.
+
+                [What are attention masks?](../glossary#attention-mask)
+
+                Indices can be obtained using [`AutoTokenizer`]. See [`PreTrainedTokenizer.encode`] and
+                [`PreTrainedTokenizer.__call__`] for details.
+
+                If `past_key_values` is used, optionally only the last `decoder_input_ids` have to be input (see
+                `past_key_values`).
+
+                If you want to change padding behavior, you should read [`modeling_opt._prepare_decoder_attention_mask`]
+                and modify to your needs. See diagram 1 in [the paper](https://huggingface.co/papers/1910.13461) for more
+                information on the default strategy.
+
+                - 1 indicates the head is **not masked**,
+                - 0 indicates the head is **masked**.
+            position_ids (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
+                Indices of positions of each input sequence tokens in the position embeddings. Selected in the range `[0,
+                config.n_positions - 1]`.
+
+                [What are position IDs?](../glossary#position-ids)
+            past_key_values (`Cache`, *optional*):
+                It is a [`~cache_utils.Cache`] instance. For more details, see our [kv cache guide](https://huggingface.co/docs/transformers/en/kv_cache).
+
+                If `past_key_values` are used, the user can optionally input only the last `input_ids` (those that don't
+                have their past key value states given to this model) of shape `(batch_size, 1)` instead of all `input_ids`
+                of shape `(batch_size, sequence_length)`.
+            use_cache (`bool`, *optional*):
+                If set to `True`, `past_key_values` key value states are returned and can be used to speed up decoding (see
+                `past_key_values`).
+            output_attentions (`bool`, *optional*):
+                Whether or not to return the attentions tensors of all attention layers. See `attentions` under returned
+                tensors for more detail.
+            output_hidden_states (`bool`, *optional*):
+                Whether or not to return the hidden states of all layers. See `hidden_states` under returned tensors for
+                more detail.
+            return_dict (`bool`, *optional*):
+                Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
+        """
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        output_hidden_states = (
+            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
+
+        return_dict = return_dict if return_dict is not None else self.config.return_dict
+
+        if self.gradient_checkpointing and self.training and use_cache:
+            logger.warning_once(
+                "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`."
+            )
+            use_cache = False
+
         if use_cache and past_key_values is None:
             past_key_values = DynamicCache(config=self.config)
 
-        past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-        position_ids = torch.arange(
-            past_seen_tokens, past_seen_tokens + hidden_states.shape[1], device=hidden_states.device
-        ).unsqueeze(0)
-        attention_mask = create_sliding_window_causal_mask(
+        if position_ids is None:
+            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+            position_ids = torch.arange(hidden_states.shape[1], device=hidden_states.device) + past_seen_tokens
+            position_ids = position_ids.unsqueeze(0)
+
+        causal_mask = create_sliding_window_causal_mask(
             config=self.config,
             inputs_embeds=hidden_states,
-            attention_mask=None,
+            attention_mask=attention_mask,
             past_key_values=past_key_values,
             position_ids=position_ids,
         )
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
 
-        for layer in self.layers:
-            hidden_states = layer(
+        # decoder layers
+        all_hidden_states = () if output_hidden_states else None
+        all_self_attns = () if output_attentions else None
+
+        for decoder_layer in self.layers:
+            if output_hidden_states:
+                all_hidden_states += (hidden_states,)
+
+            layer_outputs = decoder_layer(
                 hidden_states,
-                attention_mask=attention_mask,
-                position_embeddings=position_embeddings,
+                attention_mask=causal_mask,
+                position_ids=position_ids,
                 past_key_values=past_key_values,
-                **kwargs,
+                output_attentions=output_attentions,
+                use_cache=use_cache,
+                position_embeddings=position_embeddings,
             )
-        return hidden_states
+
+            hidden_states = layer_outputs[0]
+
+            if output_attentions:
+                all_self_attns += (layer_outputs[1],)
+
+        # add hidden states from the last decoder layer
+        if output_hidden_states:
+            all_hidden_states += (hidden_states,)
+
+        if not return_dict:
+            return tuple(
+                v for v in [hidden_states, past_key_values, all_hidden_states, all_self_attns] if v is not None
+            )
+
+        return BaseModelOutputWithPast(
+            last_hidden_state=hidden_states,
+            past_key_values=past_key_values,
+            hidden_states=all_hidden_states,
+            attentions=all_self_attns,
+        )
 
 
 class MossAudioTokenizerProjectedTransformer(nn.Module):
@@ -420,7 +560,7 @@ class MossAudioTokenizerProjectedTransformer(nn.Module):
 
     def forward(self, hidden_states, input_lengths, **kwargs):
         hidden_states = self.input_proj(hidden_states.transpose(1, 2))
-        hidden_states = self.transformer(hidden_states, **kwargs)
+        hidden_states = self.transformer(hidden_states, **kwargs).last_hidden_state
         hidden_states = self.output_proj(hidden_states).transpose(1, 2)
         return hidden_states, input_lengths
 

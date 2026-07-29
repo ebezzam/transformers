@@ -52,7 +52,7 @@ class MossAudioTokenizerTransformerConfig(PreTrainedConfig):
         Output hidden size of the transformer stage projection.
     sliding_window (`int`, *optional*, defaults to 125):
         Sliding-window attention size, in number of frames.
-    layerscale_value (`float`, *optional*, defaults to 0.01):
+    layer_scale_initial_scale (`float`, *optional*, defaults to 0.01):
         Initial value of the layer scale parameters.
     """
 
@@ -66,7 +66,9 @@ class MossAudioTokenizerTransformerConfig(PreTrainedConfig):
     head_dim: int | None = None
     max_position_embeddings: int = 2048
     sliding_window: int = 125
-    layerscale_value: float = 0.01
+    layer_scale_initial_scale: float = 0.01
+    hidden_act: str = "gelu"
+    norm_eps: float = 1e-5
     rope_parameters: RopeParameters | dict | None = None
     use_cache: bool = True
     attention_bias: bool = False
@@ -90,18 +92,6 @@ class MossAudioTokenizerTransformerConfig(PreTrainedConfig):
             )
         if self.sliding_window <= 0:
             raise ValueError(f"`sliding_window` must be positive, got {self.sliding_window}.")
-
-    @property
-    def d_model(self):
-        return self.hidden_size
-
-    @property
-    def encoder_attention_heads(self):
-        return self.num_attention_heads
-
-    @property
-    def encoder_ffn_dim(self):
-        return self.intermediate_size
 
 
 @auto_docstring(checkpoint="OpenMOSS-Team/MOSS-Audio-Tokenizer")
@@ -195,7 +185,7 @@ class MossAudioTokenizerConfig(PreTrainedConfig):
             num_hidden_layers=self.num_hidden_layers[stage_index],
             max_position_embeddings=self.max_position_embeddings,
             sliding_window=int(frame_rate * self.sliding_window_duration),
-            layerscale_value=self.layer_scale_init_value,
+            layer_scale_initial_scale=self.layer_scale_init_value,
             rope_parameters=self.rope_parameters,
             use_cache=self.use_cache,
         )

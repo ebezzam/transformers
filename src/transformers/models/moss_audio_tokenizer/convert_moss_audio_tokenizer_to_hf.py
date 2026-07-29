@@ -42,11 +42,12 @@ STATE_DICT_MAPPING = {
     r"\.weight_g$": r".parametrizations.weight.original0",
     r"\.weight_v$": r".parametrizations.weight.original1",
     r"\.out_projs\.0\.weight$": r".o_proj.weight",
-    r"\.norm1\.": r".self_attn_layer_norm.",
-    r"\.norm2\.": r".final_layer_norm.",
-    r"\.linear1\.": r".fc1.",
-    r"\.linear2\.": r".fc2.",
-    r"\.layer_scale_(\d+)\.scale$": r".layer_scale_\1.lambda1",
+    r"\.norm1\.": r".input_layernorm.",
+    r"\.norm2\.": r".post_attention_layernorm.",
+    r"\.linear1\.": r".mlp.fc1.",
+    r"\.linear2\.": r".mlp.fc2.",
+    r"\.layer_scale_1\.scale$": r".self_attn_layer_scale.scale",
+    r"\.layer_scale_2\.scale$": r".mlp_layer_scale.scale",
 }
 # fmt: on
 
